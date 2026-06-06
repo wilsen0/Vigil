@@ -116,6 +116,7 @@ const defaultableConfigInputs = [
     key: "ONCHAINOS_ENABLE_COMPAT_FALLBACK",
     label: "Compat fallback behavior",
     source: "env",
+    note: "Production default is false; enable only for a known legacy backend migration.",
   },
 ] as const satisfies readonly NetworkProfileInputDescriptor[];
 
@@ -159,7 +160,7 @@ const xlayerRequiredUserInputs = [
     key: "ONCHAINOS_API_BASE",
     label: "Execution backend API base",
     source: "env",
-    note: "Required to leave mock mode and hit the real integration endpoints.",
+    note: "Required for production quote retrieval and execution.",
   },
   {
     key: "ONCHAINOS_API_KEY",
@@ -275,7 +276,7 @@ export const networkProfiles: Record<NetworkProfileId, NetworkProfile> = {
       commListenerMode: "poll",
       onchainAuthMode: "hmac",
       onchainRequireSimulate: true,
-      onchainEnableCompatFallback: true,
+      onchainEnableCompatFallback: false,
     },
     probes: sharedProfileProbes,
     requiredUserInputs: xlayerRequiredUserInputs,

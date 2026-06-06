@@ -22,6 +22,9 @@ cp .env.example .env
 | `ONCHAINOS_API_SECRET` | API secret (for HMAC signing) | `your-api-secret` |
 | `ONCHAINOS_PASSPHRASE` | API passphrase | `your-passphrase` |
 | `ONCHAINOS_PROJECT_ID` | Project ID | `your-project-id` |
+| `ONCHAINOS_USER_WALLET_ADDRESS` | Real live wallet used to build swaps | `0x...` |
+
+Without `ONCHAINOS_API_BASE`, arbitrage quote retrieval and live execution are unavailable. The production runtime does not synthesize mock quotes or mock trades.
 
 **Network profile (choose one):**
 
@@ -44,6 +47,8 @@ MIN_NET_EDGE_BPS_LIVE=60       # minimum net edge to execute (live)
 SLIPPAGE_BPS=12                # estimated slippage
 TAKER_FEE_BPS=20               # taker fee per side
 GAS_USD_DEFAULT=1.25           # estimated gas cost per tx
+ONCHAINOS_ENABLE_COMPAT_FALLBACK=false # legacy endpoint fallback, disabled for production
+ONCHAINOS_ALLOW_SERIAL_DUAL_LEG=false  # serial dual-leg fallback, disabled for production
 ```
 
 ---
@@ -58,7 +63,7 @@ This starts:
 - HTTP API server on `http://localhost:3000`
 - Engine tick loop (every `ENGINE_INTERVAL_MS`)
 - Market watch (polls the current execution backend for quotes)
-- Demo page at `http://localhost:3000/demo`
+- Operator dashboard at `http://localhost:3000/demo`
 
 The engine immediately begins scanning for arbitrage opportunities in paper mode.
 
@@ -66,7 +71,7 @@ The engine immediately begins scanning for arbitrage opportunities in paper mode
 
 ## 3. Observe
 
-**Browser — Live Demo Page:**
+**Browser — Operator Dashboard:**
 
 Open `http://localhost:3000/demo` in a browser. It streams:
 - Real-time opportunities and trades
@@ -113,6 +118,8 @@ Streams JSON events with opportunities, trades, PnL updates, and mode changes.
 **Paper mode** (default): simulates trades against real quotes, no on-chain execution.
 
 **Live mode**: executes real trades through the current v6 flow (`quote → swap → simulate → broadcast`).
+
+Live mode requires `ONCHAINOS_USER_WALLET_ADDRESS`. Simulation fails closed unless the backend explicitly returns a success flag. Atomic dual-leg broadcast also fails closed unless the backend explicitly acknowledges the submitted bundle as atomic/all-or-nothing. Serial dual-leg fallback is disabled unless `ONCHAINOS_ALLOW_SERIAL_DUAL_LEG=true`; enabling it accepts partial-fill and hedge risk.
 
 ```bash
 # Switch to paper
@@ -237,8 +244,8 @@ curl http://localhost:3000/api/v1/discovery/sessions/<sessionId>/candidates
 # View report
 curl http://localhost:3000/api/v1/discovery/sessions/<sessionId>/report
 
-# Or use the demo script
-npm run demo:discovery
+# Or use the discovery smoke script
+npm run discovery:smoke
 ```
 
 ---
@@ -250,7 +257,7 @@ Verify the full v6 execution path is healthy:
 ```bash
 curl -X POST http://localhost:3000/api/v1/integration/execution/probe \
   -H 'Content-Type: application/json' \
-  -d '{"pair":"ETH/USDC","chainIndex":"196","notionalUsd":25}'
+  -d '{"pair":"ETH/USDC","chainIndex":"196","notionalUsd":25,"userWalletAddress":"0x..."}'
 ```
 
 Returns readiness level: `ready` / `degraded` / `unavailable`, with per-path status for quote, swap, simulate, and broadcast.
@@ -275,9 +282,9 @@ No external database required. Data persists across restarts.
 | Task | Command |
 |------|---------|
 | Start engine | `npm run dev` |
-| Open demo page | `http://localhost:3000/demo` |
+| Open dashboard | `http://localhost:3000/demo` |
 | Run full demo | `npm run demo:run` |
-| Run discovery demo | `npm run demo:discovery` |
+| Run discovery smoke | `npm run discovery:smoke` |
 | Live smoke test | `npm run demo:smoke:live` |
 | Switch to paper | `curl -X POST localhost:3000/api/v1/engine/mode -d '{"mode":"paper"}'` |
 | Today's metrics | `curl localhost:3000/api/v1/metrics/today` |

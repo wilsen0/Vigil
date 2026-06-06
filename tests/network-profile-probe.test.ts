@@ -29,7 +29,7 @@ function createOnchainClientStub(options?: {
   probeResult?: {
     ok: boolean;
     configured: boolean;
-    mode: "mock" | "v6";
+    mode: "unavailable" | "v6";
     pair: string;
     chainIndex: string;
     notionalUsd: number;
@@ -53,12 +53,12 @@ function createOnchainClientStub(options?: {
       options?.probeResult ?? {
         ok: false,
         configured: false,
-        mode: "mock" as const,
+        mode: "unavailable" as const,
         pair: "ETH/USDC",
         chainIndex: "196",
         notionalUsd: 25,
         simulateRequired: true,
-        message: "ONCHAINOS_API_BASE not configured; running in mock mode",
+        message: "ONCHAINOS_API_BASE is required for production execution",
         checkedAt: "2026-03-07T00:00:00.000Z",
       },
     ),
@@ -69,7 +69,7 @@ function createOnchainClientStub(options?: {
 }
 
 describe("network profile readiness", () => {
-  it("marks xlayer-recommended as degraded when OnchainOS stays in mock mode", () => {
+  it("marks xlayer-recommended as degraded when production execution backend is unavailable", () => {
     process.env = {
       ...originalEnv,
       NETWORK_PROFILE: "xlayer-recommended",
@@ -85,7 +85,7 @@ describe("network profile readiness", () => {
 
     expect(diagnostics.profile.id).toBe("xlayer-recommended");
     expect(diagnostics.readiness).toBe("degraded");
-    expect(diagnostics.reasons.some((reason) => reason.includes("mock mode"))).toBe(true);
+    expect(diagnostics.reasons.some((reason) => reason.includes("production quote retrieval"))).toBe(true);
   });
 
   it("marks evm-custom as unavailable until explicit chain and rpc are provided", () => {
@@ -146,4 +146,3 @@ describe("network profile readiness", () => {
     expect(createPublicClientMock).toHaveBeenCalledTimes(1);
   });
 });
-

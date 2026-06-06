@@ -334,7 +334,14 @@ export class DiscoveryEngine {
     let createdCandidates = 0;
 
     for (const pair of session.pairs) {
-      const quotes = await this.onchain.getQuotes(pair, this.options.dexes);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let quotes: any[];
+      try {
+        quotes = await this.onchain.getQuotes(pair, this.options.dexes);
+      } catch (pairError) {
+        this.store.insertAlert("warn", "discovery_pair_skip", `pair=${pair} ${pairError}`);
+        continue;
+      }
       if (quotes.length < 2) {
         continue;
       }

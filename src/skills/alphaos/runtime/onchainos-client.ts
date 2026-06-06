@@ -37,6 +37,7 @@ type QuoteWire = {
 };
 
 const DEFAULT_QUOTE_STALE_MS = 1000;
+const DUMMY_USER_WALLET_ADDRESS = "0x1111111111111111111111111111111111111111";
 
 export interface OnchainOsClientOptions {
   apiBase?: string;
@@ -50,6 +51,8 @@ export interface OnchainOsClientOptions {
   chainIndex: string;
   requireSimulate: boolean;
   enableCompatFallback: boolean;
+  allowSerialDualLeg?: boolean;
+  userWalletAddress?: string;
   tokenCacheTtlSeconds: number;
   tokenProfilePath: string;
   privateRpcUrl?: string;
@@ -82,11 +85,6 @@ class OnchainApiError extends Error {
     const text = `${this.code ?? ""} ${this.message}`.toLowerCase();
     return text.includes("whitelist") || text.includes("permission") || text.includes("unauthorized");
   }
-}
-
-function seededNoise(seed: string): number {
-  const hash = crypto.createHash("sha256").update(seed).digest();
-  return hash.readUInt16BE(0) / 65535;
 }
 
 function toNumber(input: unknown, fallback = 0): number {
@@ -139,6 +137,21 @@ function prefixedHistoryKeys(leg: "buy" | "sell", keys: string[]): string[] {
   );
 }
 
+function normalizeUserWalletAddress(input: unknown): string | null {
+  if (typeof input !== "string") {
+    return null;
+  }
+  const value = input.trim();
+  if (!/^0x[0-9a-fA-F]{40}$/.test(value)) {
+    return null;
+  }
+  const lowered = value.toLowerCase();
+  if (lowered === DUMMY_USER_WALLET_ADDRESS || /^0x0{40}$/.test(lowered)) {
+    return null;
+  }
+  return value;
+}
+
 function splitPair(pair: string): { base: string; quote: string } {
   const [baseRaw, quoteRaw] = pair.toUpperCase().split("/");
   return {
@@ -176,6 +189,8 @@ export class OnchainOsClient {
       requireSimulate: options.requireSimulate,
       tokenProfilePath: options.tokenProfilePath,
       chainIndex: options.chainIndex,
+      allowSerialDualLeg: options.allowSerialDualLeg === true,
+      userWalletConfigured: Boolean(normalizeUserWalletAddress(options.userWalletAddress)),
     };
   }
 
@@ -201,21 +216,46 @@ export class OnchainOsClient {
     const chainIndex = input?.chainIndex ?? this.options.chainIndex;
     const notionalUsdRaw = toNumber(input?.notionalUsd, 25);
     const notionalUsd = Math.max(1, Number(notionalUsdRaw.toFixed(4)));
-    const userWalletAddress =
-      input?.userWalletAddress && input.userWalletAddress.trim()
-        ? input.userWalletAddress.trim()
-        : "0x1111111111111111111111111111111111111111";
 
     if (!this.options.apiBase) {
       return {
         ok: false,
         configured: false,
-        mode: "mock",
+        mode: "unavailable",
         pair,
         chainIndex,
         notionalUsd,
         simulateRequired: this.options.requireSimulate,
-        message: "ONCHAINOS_API_BASE not configured; running in mock mode",
+        message: "ONCHAINOS_API_BASE is required for production execution",
+        checkedAt,
+      };
+    }
+
+    let userWalletAddress: string;
+    try {
+      userWalletAddress = this.pickUserWalletAddress({
+        opportunityId: "probe",
+        strategyId: "probe",
+        pair,
+        buyDex: "",
+        sellDex: "",
+        buyPrice: 0,
+        sellPrice: 0,
+        notionalUsd,
+        metadata: input?.userWalletAddress ? { userWalletAddress: input.userWalletAddress } : {},
+      });
+    } catch (error) {
+      this.recordError(error);
+      return {
+        ok: false,
+        configured: true,
+        mode: "v6",
+        pair,
+        chainIndex,
+        notionalUsd,
+        simulateRequired: this.options.requireSimulate,
+        failureStep: "swap",
+        message: String(error),
         checkedAt,
       };
     }
@@ -329,42 +369,28 @@ export class OnchainOsClient {
       };
     }
 
-    try {
-      const remote = await this.fetchTokenProfile(symbol, chainIndex);
-      const expiresAt = new Date(Date.now() + this.options.tokenCacheTtlSeconds * 1000).toISOString();
-      this.options.store?.upsertTokenCache({
-        symbol,
-        chainIndex,
-        address: remote.address,
-        decimals: remote.decimals,
-        expiresAt,
-      });
-      return {
-        symbol,
-        chainIndex,
-        address: remote.address,
-        decimals: remote.decimals,
-        source: "remote",
-        updatedAt: new Date().toISOString(),
-      };
-    } catch (error) {
-      if (cached) {
-        return {
-          symbol,
-          chainIndex,
-          address: cached.address,
-          decimals: cached.decimals,
-          source: "cache",
-          updatedAt: cached.updatedAt,
-        };
-      }
-      throw error;
-    }
+    const remote = await this.fetchTokenProfile(symbol, chainIndex);
+    const expiresAt = new Date(Date.now() + this.options.tokenCacheTtlSeconds * 1000).toISOString();
+    this.options.store?.upsertTokenCache({
+      symbol,
+      chainIndex,
+      address: remote.address,
+      decimals: remote.decimals,
+      expiresAt,
+    });
+    return {
+      symbol,
+      chainIndex,
+      address: remote.address,
+      decimals: remote.decimals,
+      source: "remote",
+      updatedAt: new Date().toISOString(),
+    };
   }
 
   async getQuotes(pair: string, dexes: string[]): Promise<Quote[]> {
     if (!this.options.apiBase) {
-      return this.getMockQuotes(pair, dexes);
+      throw new OnchainApiError("getQuotes: ONCHAINOS_API_BASE is required for production quote retrieval", 400, "API_BASE_REQUIRED");
     }
 
     const quoteToken = await this.resolveToken(pair, "quote", this.options.chainIndex);
@@ -426,14 +452,23 @@ export class OnchainOsClient {
     const quotes = (await Promise.all(quoteJobs)).filter((quote): quote is Quote => quote !== null);
 
     if (quotes.length === 0) {
-      return this.getMockQuotes(pair, dexes);
+      throw new OnchainApiError(`getQuotes: all production quote requests failed for pair=${pair} dexes=[${dexes.join(",")}]`, 502, "QUOTE_UNAVAILABLE");
     }
     return quotes;
   }
 
   async executePlan(plan: ExecutionPlan): Promise<TradeResult> {
     if (!this.options.apiBase) {
-      return this.mockTrade(plan);
+      return {
+        success: false,
+        txHash: "",
+        status: "failed",
+        grossUsd: 0,
+        feeUsd: 0,
+        netUsd: 0,
+        error: "executePlan: ONCHAINOS_API_BASE is required for production execution",
+        errorType: "config_error",
+      };
     }
 
     try {
@@ -457,10 +492,13 @@ export class OnchainOsClient {
       }
       const knownValidationCode =
         apiError instanceof OnchainApiError &&
-        ["ROUTE_MISMATCH", "SIMULATE_FAILED", "SELL_AMOUNT_INVALID", "DUAL_LEG_PARTIAL"].includes(
+        ["ROUTE_MISMATCH", "SIMULATE_FAILED", "SELL_AMOUNT_INVALID", "DUAL_LEG_PARTIAL", "ATOMIC_BUNDLE_ACK_REQUIRED"].includes(
           apiError.code ?? "",
         );
-      const errorType = this.resolveExecutionErrorType(apiError, knownValidationCode);
+      const errorType =
+        apiError instanceof OnchainApiError && apiError.code === "USER_WALLET_REQUIRED"
+          ? "config_error"
+          : this.resolveExecutionErrorType(apiError, knownValidationCode);
       return {
         success: false,
         txHash: "",
@@ -468,7 +506,10 @@ export class OnchainOsClient {
         grossUsd: 0,
         feeUsd: 0,
         netUsd: 0,
-        error: String(error),
+        error:
+          apiError instanceof OnchainApiError && apiError.code
+            ? `${apiError.code}: ${apiError.message}`
+            : String(error),
         errorType,
       };
     }
@@ -476,10 +517,10 @@ export class OnchainOsClient {
 
   async executeAtomicDualLeg(plan: ExecutionPlan): Promise<TradeResult> {
     const startedAt = Date.now();
+    const userWalletAddress = this.pickUserWalletAddress(plan);
     const quoteToken = await this.resolveToken(plan.pair, "quote", this.options.chainIndex);
     const baseToken = await this.resolveToken(plan.pair, "base", this.options.chainIndex);
     const buyAmountRaw = Math.max(1, Math.floor(plan.notionalUsd * 10 ** Math.min(quoteToken.decimals, 6)));
-    const userWalletAddress = this.pickUserWalletAddress(plan);
 
     const buyQuote = await this.getQuoteV6({
       chainIndex: this.options.chainIndex,
@@ -588,10 +629,10 @@ export class OnchainOsClient {
   }
 
   async executeDualLeg(plan: ExecutionPlan, startedAt = Date.now()): Promise<TradeResult> {
+    const userWalletAddress = this.pickUserWalletAddress(plan);
     const quoteToken = await this.resolveToken(plan.pair, "quote", this.options.chainIndex);
     const baseToken = await this.resolveToken(plan.pair, "base", this.options.chainIndex);
     const buyAmountRaw = Math.max(1, Math.floor(plan.notionalUsd * 10 ** Math.min(quoteToken.decimals, 6)));
-    const userWalletAddress = this.pickUserWalletAddress(plan);
 
     const buyLeg = await this.executeLeg({
       chainIndex: this.options.chainIndex,
@@ -799,12 +840,23 @@ export class OnchainOsClient {
   }
 
   private pickUserWalletAddress(plan: ExecutionPlan): string {
-    return typeof plan.metadata?.userWalletAddress === "string" && plan.metadata.userWalletAddress
-      ? plan.metadata.userWalletAddress
-      : "0x1111111111111111111111111111111111111111";
+    const fromPlan = normalizeUserWalletAddress(plan.metadata?.userWalletAddress);
+    const fromConfig = normalizeUserWalletAddress(this.options.userWalletAddress);
+    const address = fromPlan ?? fromConfig;
+    if (!address) {
+      throw new OnchainApiError(
+        "live userWalletAddress is required; set ONCHAINOS_USER_WALLET_ADDRESS or plan metadata.userWalletAddress",
+        400,
+        "USER_WALLET_REQUIRED",
+      );
+    }
+    return address;
   }
 
   private shouldFallbackToSerialDualLeg(error: unknown): boolean {
+    if (this.options.allowSerialDualLeg !== true) {
+      return false;
+    }
     const apiError = error as OnchainApiError;
     const status = apiError instanceof OnchainApiError ? apiError.status : undefined;
     if (status !== undefined && [404, 405, 501].includes(status)) {
@@ -911,7 +963,7 @@ export class OnchainOsClient {
       },
     });
 
-    const successFlag = this.pickBool(payload, ["success", "simulateResult", "ok"], true);
+    const successFlag = this.pickBool(payload, ["success", "simulateResult", "ok"], false);
     const message = this.pickString(payload, ["message", "msg", "errorMessage"]);
     return { success: successFlag, message, raw: payload };
   }
@@ -933,7 +985,11 @@ export class OnchainOsClient {
           method: "POST",
           body,
         });
-        return this.toBroadcastResponse(privatePayload, privateChannel.channel);
+        return this.toBroadcastResponse(
+          privatePayload,
+          privateChannel.channel,
+          Array.isArray(input.bundleTxs) && input.bundleTxs.length > 0,
+        );
       } catch (error) {
         this.recordError(error);
         this.options.store?.insertAlert("warn", "private_submit_failed", String(error));
@@ -946,7 +1002,11 @@ export class OnchainOsClient {
       method: "POST",
       body,
     });
-    return this.toBroadcastResponse(publicPayload, "public");
+    return this.toBroadcastResponse(
+      publicPayload,
+      "public",
+      Array.isArray(input.bundleTxs) && input.bundleTxs.length > 0,
+    );
   }
 
   async getHistoryV6(txHash: string): Promise<Record<string, unknown> | null> {
@@ -1018,10 +1078,17 @@ export class OnchainOsClient {
     return undefined;
   }
 
-  private toBroadcastResponse(payload: Record<string, unknown>, channel: SubmitChannel): OnchainV6BroadcastResponse {
+  private toBroadcastResponse(
+    payload: Record<string, unknown>,
+    channel: SubmitChannel,
+    requiresAtomicAck = false,
+  ): OnchainV6BroadcastResponse {
     const txHash = this.pickString(payload, ["txHash", "hash", "transactionHash"]);
     if (!txHash) {
       throw new OnchainApiError("broadcast response missing txHash", 422, "BROADCAST_PAYLOAD_INVALID");
+    }
+    if (requiresAtomicAck) {
+      this.assertAtomicBundleAcknowledged(payload);
     }
     this.recordSubmitChannel(channel);
     return {
@@ -1034,6 +1101,28 @@ export class OnchainOsClient {
   private recordSubmitChannel(channel: SubmitChannel): void {
     this.diagnostics.lastSubmitChannel = channel;
     this.options.store?.insertAlert("info", "submit_channel", `submit channel=${channel}`);
+  }
+
+  private assertAtomicBundleAcknowledged(payload: Record<string, unknown>): void {
+    const accepted = this.pickBool(
+      payload,
+      ["atomic", "atomicAccepted", "atomicBundle", "bundleAtomic", "allOrNothing"],
+      false,
+    );
+    if (accepted) {
+      return;
+    }
+
+    const status = this.pickString(payload, ["bundleStatus", "atomicStatus", "bundleMode"]);
+    if (status && ["atomic", "accepted", "all_or_nothing", "all-or-nothing"].includes(status.toLowerCase())) {
+      return;
+    }
+
+    throw new OnchainApiError(
+      "bundle broadcast response missing explicit atomic acknowledgement",
+      422,
+      "ATOMIC_BUNDLE_ACK_REQUIRED",
+    );
   }
 
   private resolveSwapSlippage(): string {
@@ -1077,42 +1166,6 @@ export class OnchainOsClient {
       address,
       decimals,
     };
-  }
-
-  private mockTrade(plan: ExecutionPlan): TradeResult {
-    const spread = (plan.sellPrice - plan.buyPrice) / plan.buyPrice;
-    const grossUsd = spread * plan.notionalUsd;
-    const feeUsd = Math.max(0.8, plan.notionalUsd * 0.0022);
-    const netUsd = grossUsd - feeUsd;
-    return {
-      success: netUsd > -5,
-      txHash: `0x${crypto.randomBytes(32).toString("hex")}`,
-      status: netUsd > -5 ? "confirmed" : "failed",
-      grossUsd,
-      feeUsd,
-      netUsd,
-      error: netUsd > -5 ? undefined : "mock live trade not profitable",
-    };
-  }
-
-  private getMockQuotes(pair: string, dexes: string[]): Quote[] {
-    const epochBucket = Math.floor(Date.now() / 5000);
-    const base = 3000 + seededNoise(`${pair}:${epochBucket}`) * 40;
-
-    return dexes.map((dex, index) => {
-      const noise = seededNoise(`${pair}:${dex}:${epochBucket}`);
-      const spreadFactor = index === 0 ? -0.0045 : 0.0045;
-      const mid = base * (1 + spreadFactor + (noise - 0.5) * 0.0025);
-      const halfSpread = mid * 0.0009;
-      return {
-        pair,
-        dex,
-        bid: Number((mid - halfSpread).toFixed(6)),
-        ask: Number((mid + halfSpread).toFixed(6)),
-        gasUsd: this.options.gasUsdDefault,
-        ts: new Date().toISOString(),
-      };
-    });
   }
 
   private estimateGrossFromQuotes(

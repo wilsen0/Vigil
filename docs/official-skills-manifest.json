@@ -15,8 +15,7 @@
         "status": "visible",
         "surfaces": [
           "/api/v1/discovery/sessions/:sessionId/approve.moduleResponse.marketContext.sourceSkill",
-          "/api/v1/discovery/sessions/:sessionId/approve.skillAttribution.requiredSkillsUsed",
-          "/api/v1/discovery/sessions/:sessionId/approve/paper-demo.demo.skillAttribution.requiredSkillsUsed"
+          "/api/v1/discovery/sessions/:sessionId/approve.skillAttribution.requiredSkillsUsed"
         ]
       },
       "notes": "First-batch arbitrage adapter."
@@ -32,8 +31,7 @@
         "status": "visible",
         "surfaces": [
           "/api/v1/discovery/sessions/:sessionId/approve.moduleResponse.readinessContext.sourceSkill",
-          "/api/v1/discovery/sessions/:sessionId/approve.skillAttribution.requiredSkillsUsed",
-          "/api/v1/discovery/sessions/:sessionId/approve/paper-demo.demo.skillAttribution.requiredSkillsUsed"
+          "/api/v1/discovery/sessions/:sessionId/approve.skillAttribution.requiredSkillsUsed"
         ]
       },
       "notes": "First-batch arbitrage adapter."
@@ -49,8 +47,7 @@
         "status": "visible",
         "surfaces": [
           "/api/v1/discovery/sessions/:sessionId/approve.moduleResponse.enrichmentContext.sourceSkills",
-          "/api/v1/discovery/sessions/:sessionId/approve.skillAttribution.enrichmentSkillsUsed",
-          "/api/v1/discovery/sessions/:sessionId/approve/paper-demo.demo.skillAttribution.enrichmentSkillsUsed"
+          "/api/v1/discovery/sessions/:sessionId/approve.skillAttribution.enrichmentSkillsUsed"
         ]
       },
       "notes": "First-batch arbitrage adapter."
@@ -66,8 +63,7 @@
         "status": "visible",
         "surfaces": [
           "/api/v1/discovery/sessions/:sessionId/approve.moduleResponse.enrichmentContext.sourceSkills",
-          "/api/v1/discovery/sessions/:sessionId/approve.skillAttribution.enrichmentSkillsUsed",
-          "/api/v1/discovery/sessions/:sessionId/approve/paper-demo.demo.skillAttribution.enrichmentSkillsUsed"
+          "/api/v1/discovery/sessions/:sessionId/approve.skillAttribution.enrichmentSkillsUsed"
         ]
       },
       "notes": "First-batch arbitrage adapter."

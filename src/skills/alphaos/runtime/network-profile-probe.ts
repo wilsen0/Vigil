@@ -285,7 +285,7 @@ function buildOnchainStatusCheck(
       label: "Onchain integration status",
       required: false,
       status: "warn",
-      summary: "ONCHAINOS_API_BASE is not configured, so the execution backend stays in mock mode",
+      summary: "ONCHAINOS_API_BASE is not configured, so production quote retrieval and execution are unavailable",
       details: onchainStatus as unknown as Record<string, unknown>,
     };
   }
@@ -561,7 +561,7 @@ export async function probeNetworkProfileReadiness(
               status: "warn",
               summary: probe.configured
                 ? probe.message
-                : "Onchain probe is unavailable because the integration is still running in mock mode",
+                : "Onchain probe is unavailable because ONCHAINOS_API_BASE is not configured",
               details: probe as unknown as Record<string, unknown>,
             },
       );

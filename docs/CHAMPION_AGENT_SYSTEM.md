@@ -527,7 +527,7 @@ The emotional takeaway should be:
 - arbitrage contract
 - decision taxonomy
 - adapter-backed normalized contexts
-- paper-mode judge demo flow
+- production approval flow with explicit paper/live mode
 - signal radar with normalized events (`NormalizedSignal`)
 - contact policy engine with 6-level attention ladder (`silent` → `call_escalation`)
 - one-breath voice brief generation (`zh` / `en`)

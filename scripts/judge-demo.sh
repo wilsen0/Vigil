@@ -71,7 +71,7 @@ print_step "Judge Demo Overview"
 print_info "This script reuses existing repo demos with conservative defaults."
 print_info "Planned flow:"
 print_info "  1) npm run demo:living-assistant"
-print_info "  2) npm run demo:discovery (only if $BASE_URL is ready and auth passes)"
+print_info "  2) npm run discovery:smoke (only if $BASE_URL is ready and auth passes)"
 
 print_step "Prerequisite Checks"
 missing=0
@@ -133,7 +133,7 @@ if [[ "$auth_status" != "200" ]]; then
 fi
 
 print_step "Run API-Backed Discovery Demo"
-if npm run demo:discovery; then
+if npm run discovery:smoke; then
   print_info "Discovery demo completed."
   print_info "Review evidence artifacts under demo-output/."
 else

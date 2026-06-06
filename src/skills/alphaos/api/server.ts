@@ -1,4 +1,5 @@
 import express from "express";
+import type { RequestHandler } from "express";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -458,106 +459,6 @@ function buildModuleSkillAttributionView(moduleResponse: ArbitrageModuleResponse
     enrichmentSkillsUsed,
     distributionSkillsUsed,
     metadata: moduleResponse.skillUsage.metadata ?? null,
-  };
-}
-
-function buildJudgePaperModeDemoPayload(input: {
-  requestedMode: "paper" | "live";
-  executionMode: "paper" | "live";
-  effectiveMode: "paper" | "live";
-  liveRequestDowngradedForDemo: boolean;
-  moduleResponse: ArbitrageModuleResponse;
-}) {
-  const execution = input.moduleResponse.execution;
-  const skillAttribution = buildModuleSkillAttributionView(input.moduleResponse);
-  const liveRequestDowngraded =
-    input.liveRequestDowngradedForDemo
-    || (input.requestedMode === "live" && input.effectiveMode === "paper");
-  const modeResolution = input.liveRequestDowngradedForDemo
-    ? "live_request_downgraded_to_paper_for_demo_safety"
-    : input.requestedMode === "live" && input.effectiveMode === "paper"
-      ? "live_request_downgraded_to_paper_by_runtime_safety"
-      : input.requestedMode === "paper" && input.effectiveMode === "paper"
-        ? "paper_mode_requested"
-        : "live_mode_effective";
-  const primarySafetyNote = liveRequestDowngraded
-    ? "Live execution request was downgraded to paper because this is the demo-safe approval route."
-    : "Paper mode execution was used for this judge-facing demo approval route.";
-  const approvalNote =
-    input.moduleResponse.status === "candidate_ready_for_approval"
-    || execution?.status === "awaiting_approval"
-      ? "Execution is awaiting approval before any live action can proceed."
-      : undefined;
-  const notes = [primarySafetyNote, approvalNote].filter((value): value is string => Boolean(value));
-
-  return {
-    flow: "arbitrage_judge_paper_demo_v1",
-    demoSafe: input.effectiveMode === "paper",
-    modePolicy: "paper_mode_enforced",
-    requestedMode: input.requestedMode,
-    executionMode: input.executionMode,
-    effectiveMode: input.effectiveMode,
-    modeResolution,
-    liveRequestDowngraded,
-    operatorSummary: input.moduleResponse.summary.operatorText,
-    judgeSummary: `${input.moduleResponse.summary.judgeText} ${primarySafetyNote}`,
-    decisionSummary: {
-      status: input.moduleResponse.status,
-      decision: input.moduleResponse.decision,
-      summary: input.moduleResponse.decisionView.summary,
-      reasonCodes: input.moduleResponse.decisionView.reasonCodes,
-      blockingReasonCodes: input.moduleResponse.decisionView.blockingReasonCodes,
-    },
-    candidateSummary: input.moduleResponse.candidate
-      ? {
-          candidateId: input.moduleResponse.candidate.candidateId,
-          pair: input.moduleResponse.candidate.pair,
-          status: input.moduleResponse.candidate.status,
-          buyVenue: input.moduleResponse.candidate.buyVenue,
-          sellVenue: input.moduleResponse.candidate.sellVenue,
-        }
-      : null,
-    contexts: {
-      marketContext: input.moduleResponse.marketContext ?? null,
-      readinessContext: input.moduleResponse.readinessContext ?? null,
-      enrichmentContext: input.moduleResponse.enrichmentContext ?? null,
-    },
-    simulationSummary: input.moduleResponse.simulation
-      ? {
-          status: input.moduleResponse.simulation.status,
-          summary: input.moduleResponse.simulation.summary,
-          netUsd: input.moduleResponse.simulation.metrics.netUsd,
-          netEdgeBps: input.moduleResponse.simulation.metrics.netEdgeBps,
-          reasonCodes: input.moduleResponse.simulation.reasonCodes,
-        }
-      : null,
-    executionSummary: execution
-      ? {
-          status: execution.status,
-          requestedMode: input.requestedMode,
-          effectiveMode: input.effectiveMode,
-          degradedToPaper: liveRequestDowngraded || Boolean(execution.degradedToPaper),
-          tradeStatus: execution.tradeStatus ?? null,
-          txHash: execution.txHash ?? null,
-          summary: execution.summary,
-          reasonCodes: execution.reasonCodes,
-          liveExecutionAttempted: false,
-        }
-      : {
-          status: "not_attempted",
-          requestedMode: input.requestedMode,
-          effectiveMode: input.effectiveMode,
-          degradedToPaper: liveRequestDowngraded,
-          tradeStatus: null,
-          txHash: null,
-          summary: "Execution not attempted in this stage.",
-          reasonCodes: [],
-          liveExecutionAttempted: false,
-        },
-    skillAttribution,
-    keyReasonCodes: input.moduleResponse.decisionView.reasonCodes,
-    keyBlockingReasonCodes: input.moduleResponse.decisionView.blockingReasonCodes,
-    notes,
   };
 }
 
@@ -2324,69 +2225,6 @@ export function createServer(
         ...result,
         moduleResponse,
         skillAttribution,
-      });
-    } catch (error) {
-      handleDiscoveryError(res, error);
-    }
-  });
-
-  app.post("/api/v1/discovery/sessions/:sessionId/approve/paper-demo", async (req, res) => {
-    const discovery = ensureDiscoveryEngine(res);
-    if (!discovery) {
-      return;
-    }
-    const sessionId = String(req.params.sessionId ?? "").trim();
-    const candidateId = String(req.body?.candidateId ?? "").trim();
-    if (!candidateId) {
-      res.status(400).json({ error: "candidateId is required" });
-      return;
-    }
-    if (req.body?.mode !== undefined && req.body?.mode !== "paper" && req.body?.mode !== "live") {
-      res.status(400).json({ error: "mode must be paper or live" });
-      return;
-    }
-    const requestedMode: "paper" | "live" = req.body?.mode === "live" ? "live" : "paper";
-    const executionMode: "paper" = "paper";
-    const liveRequestDowngradedForDemo = requestedMode === "live";
-
-    try {
-      const discoveryCandidate = store.getDiscoveryCandidate(sessionId, candidateId) ?? undefined;
-      const result = await discovery.approveCandidate(sessionId, candidateId, executionMode);
-      const updatedCandidate = store.getDiscoveryCandidate(sessionId, candidateId) ?? discoveryCandidate;
-      const compatibilityAdapters = parseFirstBatchAdapterInputs(req.body?.adapterInputs);
-      const moduleResponse = adaptArbitrageModuleResponse({
-        requestId: `discovery-paper-demo:${sessionId}:${candidateId}`,
-        mode: executionMode,
-        requestedMode: executionMode,
-        effectiveMode: result.effectiveMode,
-        discoveryCandidate: updatedCandidate ?? undefined,
-        approveResult: result,
-        compatibilityAdapters,
-      });
-      const skillAttribution = buildModuleSkillAttributionView(moduleResponse);
-      const demo = buildJudgePaperModeDemoPayload({
-        requestedMode,
-        executionMode,
-        effectiveMode: result.effectiveMode,
-        liveRequestDowngradedForDemo,
-        moduleResponse,
-      });
-
-      res.json({
-        ...result,
-        requestedMode,
-        executionMode,
-        effectiveMode: result.effectiveMode,
-        runtimeDegradedToPaper: result.degradedToPaper,
-        degradedToPaper: demo.liveRequestDowngraded || result.degradedToPaper,
-        modePolicy: "paper_mode_enforced",
-        demoSafe: demo.demoSafe,
-        moduleResponse,
-        skillAttribution,
-        operatorSummary: demo.operatorSummary,
-        judgeSummary: demo.judgeSummary,
-        decisionSummary: demo.decisionSummary,
-        demo,
       });
     } catch (error) {
       handleDiscoveryError(res, error);

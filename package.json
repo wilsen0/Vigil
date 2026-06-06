@@ -10,6 +10,7 @@
     "test:watch": "vitest",
     "demo:run": "bash scripts/hackathon-demo.sh",
     "demo:judge": "bash scripts/judge-demo.sh",
+    "discovery:smoke": "bash scripts/discovery-demo.sh",
     "demo:discovery": "bash scripts/discovery-demo.sh",
     "demo:living-assistant": "tsx scripts/living-assistant-demo.ts",
     "demo:smoke:live": "bash scripts/execution-live-smoke.sh"
@@ -28,6 +29,7 @@
     "express": "^5.2.1",
     "pino": "^10.3.1",
     "qrcode": "^1.5.4",
+    "undici": "^7.25.0",
     "viem": "^2.47.0",
     "zod": "^4.3.6"
   },

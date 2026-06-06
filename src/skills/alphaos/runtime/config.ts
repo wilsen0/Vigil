@@ -113,6 +113,8 @@ export interface AlphaOsConfig {
   onchainChainIndex: string;
   onchainRequireSimulate: boolean;
   onchainEnableCompatFallback: boolean;
+  onchainAllowSerialDualLeg: boolean;
+  onchainUserWalletAddress?: string;
   onchainTokenCacheTtlSeconds: number;
   onchainTokenProfilePath: string;
   onchainPrivateRpcUrl?: string;
@@ -221,6 +223,8 @@ export const alphaOsConfigSchema: z.ZodType<AlphaOsConfig> = z
     onchainChainIndex: z.string(),
     onchainRequireSimulate: z.boolean(),
     onchainEnableCompatFallback: z.boolean(),
+    onchainAllowSerialDualLeg: z.boolean(),
+    onchainUserWalletAddress: z.string().optional(),
     onchainTokenCacheTtlSeconds: z.number().finite(),
     onchainTokenProfilePath: z.string(),
     onchainPrivateRpcUrl: z.string().optional(),
@@ -366,8 +370,10 @@ export function loadConfig(): AlphaOsConfig {
     ),
     onchainEnableCompatFallback: readBoolean(
       "ONCHAINOS_ENABLE_COMPAT_FALLBACK",
-      networkProfile.defaults.onchainEnableCompatFallback ?? true,
+      networkProfile.defaults.onchainEnableCompatFallback ?? false,
     ),
+    onchainAllowSerialDualLeg: readBoolean("ONCHAINOS_ALLOW_SERIAL_DUAL_LEG", false),
+    onchainUserWalletAddress: process.env.ONCHAINOS_USER_WALLET_ADDRESS,
     onchainTokenCacheTtlSeconds: readNumber("ONCHAINOS_TOKEN_CACHE_TTL_SECONDS", 600),
     onchainTokenProfilePath:
       process.env.ONCHAINOS_TOKEN_PROFILE_PATH ?? "/api/v6/market/token/profile/current",

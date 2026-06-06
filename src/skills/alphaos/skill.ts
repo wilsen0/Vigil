@@ -93,6 +93,8 @@ export function createAlphaOsSkill(config: AlphaOsConfig, logger: Logger) {
     chainIndex: config.onchainChainIndex,
     requireSimulate: config.onchainRequireSimulate,
     enableCompatFallback: config.onchainEnableCompatFallback,
+    allowSerialDualLeg: config.onchainAllowSerialDualLeg,
+    userWalletAddress: config.onchainUserWalletAddress,
     tokenCacheTtlSeconds: config.onchainTokenCacheTtlSeconds,
     tokenProfilePath: config.onchainTokenProfilePath,
     privateRpcUrl: config.onchainPrivateRpcUrl,

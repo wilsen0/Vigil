@@ -1,4 +1,10 @@
 import fs from "node:fs";
+import { ProxyAgent, setGlobalDispatcher } from "undici";
+
+const proxyUrl = process.env.HTTPS_PROXY || process.env.HTTP_PROXY;
+if (proxyUrl) {
+  setGlobalDispatcher(new ProxyAgent(proxyUrl));
+}
 import path from "node:path";
 import { createLogger } from "./skills/alphaos/runtime/logger";
 import { loadConfig } from "./skills/alphaos/runtime/config";

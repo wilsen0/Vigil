@@ -68,7 +68,7 @@ export interface TradeResult {
   feeUsd: number;
   netUsd: number;
   error?: string;
-  errorType?: "permission_denied" | "whitelist_restricted" | "network" | "validation" | "unknown";
+  errorType?: "permission_denied" | "whitelist_restricted" | "network" | "validation" | "config_error" | "unknown";
   latencyMs?: number;
   slippageDeviationBps?: number;
 }
@@ -358,6 +358,8 @@ export interface OnchainIntegrationStatus {
   requireSimulate: boolean;
   tokenProfilePath: string;
   chainIndex: string;
+  allowSerialDualLeg?: boolean;
+  userWalletConfigured?: boolean;
   lastSubmitChannel?: "public" | "private-rpc" | "private-relay";
   lastError?: string;
   lastErrorAt?: string;
@@ -369,7 +371,7 @@ export interface OnchainIntegrationStatus {
 export interface OnchainProbeResult {
   ok: boolean;
   configured: boolean;
-  mode: "mock" | "v6";
+  mode: "unavailable" | "v6";
   pair: string;
   chainIndex: string;
   notionalUsd: number;

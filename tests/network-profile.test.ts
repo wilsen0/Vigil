@@ -64,7 +64,7 @@ describe("getNetworkProfile", () => {
     expect(profile.defaults.commListenerMode).toBe("poll");
     expect(profile.defaults.onchainAuthMode).toBe("hmac");
     expect(profile.defaults.onchainRequireSimulate).toBe(true);
-    expect(profile.defaults.onchainEnableCompatFallback).toBe(true);
+    expect(profile.defaults.onchainEnableCompatFallback).toBe(false);
   });
 
   it("returns evm-custom profile with empty defaults", () => {

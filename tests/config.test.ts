@@ -63,10 +63,25 @@ describe("loadConfig security defaults", () => {
   it("defaults live toggles to false", () => {
     delete process.env.LIVE_ENABLED;
     delete process.env.AUTO_PROMOTE_TO_LIVE;
+    delete process.env.ONCHAINOS_ENABLE_COMPAT_FALLBACK;
+    delete process.env.ONCHAINOS_ALLOW_SERIAL_DUAL_LEG;
+    delete process.env.ONCHAINOS_USER_WALLET_ADDRESS;
 
     const config = loadConfig();
     expect(config.liveEnabled).toBe(false);
     expect(config.autoPromoteToLive).toBe(false);
+    expect(config.onchainEnableCompatFallback).toBe(false);
+    expect(config.onchainAllowSerialDualLeg).toBe(false);
+    expect(config.onchainUserWalletAddress).toBeUndefined();
+  });
+
+  it("reads production onchain execution boundary configuration from env", () => {
+    process.env.ONCHAINOS_ALLOW_SERIAL_DUAL_LEG = "true";
+    process.env.ONCHAINOS_USER_WALLET_ADDRESS = "0x2222222222222222222222222222222222222222";
+
+    const config = loadConfig();
+    expect(config.onchainAllowSerialDualLeg).toBe(true);
+    expect(config.onchainUserWalletAddress).toBe("0x2222222222222222222222222222222222222222");
   });
 
   it("reads API secret and demo visibility from env", () => {

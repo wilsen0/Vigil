@@ -13,6 +13,8 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
+const TEST_WALLET = "0x2222222222222222222222222222222222222222";
+
 describe("OnchainOsClient v6 integration", () => {
   const originalFetch = globalThis.fetch;
   const stores: StateStore[] = [];
@@ -147,7 +149,7 @@ describe("OnchainOsClient v6 integration", () => {
       pair: "ETH/USDC",
       chainIndex: "196",
       notionalUsd: 25,
-      userWalletAddress: "0x1111111111111111111111111111111111111111",
+      userWalletAddress: TEST_WALLET,
     });
 
     const swapCall = (mockFetch.mock.calls as Array<[URL | RequestInfo]>).find(([value]) =>
@@ -158,7 +160,7 @@ describe("OnchainOsClient v6 integration", () => {
     expect(url.searchParams.get("slippage")).toBe("0.12");
   });
 
-  it("resolves token with cache hit and stale-cache fallback", async () => {
+  it("resolves token with fresh cache and fails closed on expired cache when remote profile fails", async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "alphaos-token-"));
     tempDirs.push(tempDir);
     const store = new StateStore(tempDir);
@@ -181,6 +183,7 @@ describe("OnchainOsClient v6 integration", () => {
       tokenCacheTtlSeconds: 600,
       tokenProfilePath: "/api/v6/market/token/profile/current",
       store,
+      userWalletAddress: TEST_WALLET,
     });
 
     const first = await client.resolveToken("ETH/USDC", "base", "196");
@@ -202,9 +205,7 @@ describe("OnchainOsClient v6 integration", () => {
     });
     globalThis.fetch = failingFetch as unknown as typeof fetch;
 
-    const staleFallback = await client.resolveToken("ETH/USDC", "base", "196");
-    expect(staleFallback.source).toBe("cache");
-    expect(staleFallback.address).toBe("0xeth-old");
+    await expect(client.resolveToken("ETH/USDC", "base", "196")).rejects.toThrow("network down");
   });
 
   it("classifies restricted simulate error for live flow", async () => {
@@ -234,6 +235,7 @@ describe("OnchainOsClient v6 integration", () => {
       tokenCacheTtlSeconds: 600,
       tokenProfilePath: "/api/v6/market/token/profile/current",
       store,
+      userWalletAddress: TEST_WALLET,
     });
 
     const result = await client.executePlan({
@@ -249,6 +251,49 @@ describe("OnchainOsClient v6 integration", () => {
 
     expect(result.success).toBe(false);
     expect(["permission_denied", "whitelist_restricted"]).toContain(result.errorType);
+  });
+
+  it("fails live execution as config_error without a real wallet before backend calls", async () => {
+    const mockFetch = vi.fn(async () => jsonResponse({ code: "UNEXPECTED" }, 500));
+    globalThis.fetch = mockFetch as unknown as typeof fetch;
+
+    const baseOptions = {
+      apiBase: "http://localhost:9999",
+      apiKey: "k1",
+      authMode: "bearer" as const,
+      apiKeyHeader: "X-API-Key",
+      gasUsdDefault: 1,
+      chainIndex: "196",
+      requireSimulate: true,
+      enableCompatFallback: false,
+      tokenCacheTtlSeconds: 600,
+      tokenProfilePath: "/api/v6/market/token/profile/current",
+    };
+    const plan = {
+      opportunityId: "opp-wallet-required",
+      strategyId: "dex-arbitrage",
+      pair: "ETH/USDC",
+      buyDex: "dex-a",
+      sellDex: "dex-b",
+      buyPrice: 100,
+      sellPrice: 101,
+      notionalUsd: 10,
+    };
+
+    const missingWallet = new OnchainOsClient(baseOptions);
+    const missingResult = await missingWallet.executePlan(plan);
+
+    const dummyWallet = new OnchainOsClient({
+      ...baseOptions,
+      userWalletAddress: "0x1111111111111111111111111111111111111111",
+    });
+    const dummyResult = await dummyWallet.executePlan(plan);
+
+    expect(missingResult.success).toBe(false);
+    expect(missingResult.errorType).toBe("config_error");
+    expect(dummyResult.success).toBe(false);
+    expect(dummyResult.errorType).toBe("config_error");
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
   it("probes v6 integration without broadcasting", async () => {
@@ -284,7 +329,7 @@ describe("OnchainOsClient v6 integration", () => {
       pair: "ETH/USDC",
       chainIndex: "196",
       notionalUsd: 25,
-      userWalletAddress: "0x1111111111111111111111111111111111111111",
+      userWalletAddress: TEST_WALLET,
     });
 
     expect(probe.ok).toBe(true);
@@ -293,6 +338,35 @@ describe("OnchainOsClient v6 integration", () => {
     expect(probe.swapPath).toContain("/api/v6/dex/aggregator/swap");
     expect(probe.simulatePath).toContain("/api/v6/dex/pre-transaction/simulate");
     expect(mockFetch).toHaveBeenCalledTimes(5);
+  });
+
+  it("fails simulation closed when backend omits explicit success fields", async () => {
+    const mockFetch = vi.fn(async () => jsonResponse({ data: [{ message: "missing success flag" }] }));
+    globalThis.fetch = mockFetch as unknown as typeof fetch;
+
+    const client = new OnchainOsClient({
+      apiBase: "http://localhost:9999",
+      apiKey: "k1",
+      authMode: "bearer",
+      apiKeyHeader: "X-API-Key",
+      gasUsdDefault: 1,
+      chainIndex: "196",
+      requireSimulate: true,
+      enableCompatFallback: false,
+      tokenCacheTtlSeconds: 600,
+      tokenProfilePath: "/api/v6/market/token/profile/current",
+    });
+
+    const result = await client.simulateV6({
+      chainIndex: "196",
+      txData: "0xabc",
+      to: "0xrouter",
+      value: "0",
+      userWalletAddress: TEST_WALLET,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.message).toBe("missing success flag");
   });
 
   it("executes atomic dual-leg with buy/sell dex constraints", async () => {
@@ -358,7 +432,7 @@ describe("OnchainOsClient v6 integration", () => {
         const body = JSON.parse(String(init?.body ?? "{}")) as { bundleTxs?: Array<{ txData?: string }> };
         expect(Array.isArray(body.bundleTxs)).toBe(true);
         expect(body.bundleTxs?.length).toBe(2);
-        return jsonResponse({ data: [{ txHash: "0xatomic-tx-1" }] });
+        return jsonResponse({ data: [{ txHash: "0xatomic-tx-1", atomic: true }] });
       }
       if (pathname.includes("/aggregator/history")) {
         return jsonResponse({ data: [{ status: "confirmed" }] });
@@ -379,6 +453,7 @@ describe("OnchainOsClient v6 integration", () => {
       tokenCacheTtlSeconds: 600,
       tokenProfilePath: "/api/v6/market/token/profile/current",
       store,
+      userWalletAddress: TEST_WALLET,
     });
 
     const result = await client.executePlan({
@@ -397,6 +472,86 @@ describe("OnchainOsClient v6 integration", () => {
     expect(result.netUsd).toBe(0);
     expect(result.txHash).toBe("0xatomic-tx-1");
     expect(result.latencyMs).toBeTypeOf("number");
+  });
+
+  it("fails closed when atomic bundle response lacks explicit atomic acknowledgement", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "alphaos-atomic-ack-"));
+    tempDirs.push(tempDir);
+    const store = new StateStore(tempDir);
+    stores.push(store);
+
+    let broadcastCount = 0;
+    const mockFetch = vi.fn(async (input: URL | RequestInfo) => {
+      const url = new URL(String(input));
+      const pathname = url.pathname;
+      const from = url.searchParams.get("fromTokenAddress");
+      const to = url.searchParams.get("toTokenAddress");
+      const tokenSymbol = url.searchParams.get("tokenSymbol");
+
+      if (pathname.includes("/market/token/profile/current")) {
+        if (tokenSymbol === "USDC") {
+          return jsonResponse({ data: [{ tokenContractAddress: "0xusdc", tokenDecimal: "6" }] });
+        }
+        return jsonResponse({ data: [{ tokenContractAddress: "0xeth", tokenDecimal: "18" }] });
+      }
+      if (pathname.includes("/aggregator/quote")) {
+        if (from === "0xusdc" && to === "0xeth") {
+          return jsonResponse({
+            data: [{ fromTokenAmount: "10000000", toTokenAmount: "5000000000000000", dexRouterList: [{ dexName: "dex-a" }] }],
+          });
+        }
+        return jsonResponse({
+          data: [{ fromTokenAmount: "5000000000000000", toTokenAmount: "10050000", dexRouterList: [{ dexName: "dex-b" }] }],
+        });
+      }
+      if (pathname.includes("/aggregator/swap")) {
+        if (from === "0xusdc" && to === "0xeth") {
+          return jsonResponse({ data: [{ txData: "0xbuy", to: "0xrouter-a", value: "0" }] });
+        }
+        return jsonResponse({ data: [{ txData: "0xsell", to: "0xrouter-b", value: "0" }] });
+      }
+      if (pathname.includes("/pre-transaction/simulate")) {
+        return jsonResponse({ data: [{ success: true }] });
+      }
+      if (pathname.includes("/broadcast-transaction")) {
+        broadcastCount += 1;
+        return jsonResponse({ data: [{ txHash: "0xnon-atomic-response" }] });
+      }
+      return jsonResponse({ code: "404" }, 404);
+    });
+    globalThis.fetch = mockFetch as unknown as typeof fetch;
+
+    const client = new OnchainOsClient({
+      apiBase: "http://localhost:9999",
+      apiKey: "k1",
+      authMode: "bearer",
+      apiKeyHeader: "X-API-Key",
+      gasUsdDefault: 1,
+      chainIndex: "196",
+      requireSimulate: true,
+      enableCompatFallback: false,
+      tokenCacheTtlSeconds: 600,
+      tokenProfilePath: "/api/v6/market/token/profile/current",
+      store,
+      userWalletAddress: TEST_WALLET,
+    });
+
+    const result = await client.executePlan({
+      opportunityId: "opp-atomic-ack",
+      strategyId: "dex-arbitrage",
+      pair: "ETH/USDC",
+      buyDex: "dex-a",
+      sellDex: "dex-b",
+      buyPrice: 100,
+      sellPrice: 101,
+      notionalUsd: 10,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.errorType).toBe("validation");
+    expect(result.error).toContain("ATOMIC_BUNDLE_ACK_REQUIRED");
+    expect(broadcastCount).toBe(1);
+    expect(store.listAlerts(5).some((alert) => alert.eventType === "atomic_dual_leg_fallback")).toBe(false);
   });
 
   it("builds bid/ask from real buy and sell quotes on the same dex", async () => {
@@ -519,7 +674,7 @@ describe("OnchainOsClient v6 integration", () => {
       if (pathname.includes("/broadcast-transaction")) {
         const body = JSON.parse(String(init?.body ?? "{}")) as { bundleTxs?: Array<{ txData?: string }> };
         expect(body.bundleTxs?.length).toBe(2);
-        return jsonResponse({ data: [{ txHash: "0xatomic-pnl" }] });
+        return jsonResponse({ data: [{ txHash: "0xatomic-pnl", atomic: true }] });
       }
       if (pathname.includes("/aggregator/history")) {
         return jsonResponse({ data: [{ status: "confirmed" }] });
@@ -546,6 +701,7 @@ describe("OnchainOsClient v6 integration", () => {
       liquidityUsdDefault: 1_000_000,
       volatilityDefault: 0,
       avgLatencyMsDefault: 100,
+      userWalletAddress: TEST_WALLET,
     });
 
     const result = await client.executePlan({
@@ -647,6 +803,7 @@ describe("OnchainOsClient v6 integration", () => {
       enableCompatFallback: false,
       tokenCacheTtlSeconds: 600,
       tokenProfilePath: "/api/v6/market/token/profile/current",
+      userWalletAddress: TEST_WALLET,
     });
 
     const result = await client.executeDualLeg({
@@ -708,6 +865,7 @@ describe("OnchainOsClient v6 integration", () => {
       tokenCacheTtlSeconds: 600,
       tokenProfilePath: "/api/v6/market/token/profile/current",
       store,
+      userWalletAddress: TEST_WALLET,
     });
 
     const result = await client.executePlan({
@@ -818,7 +976,7 @@ describe("OnchainOsClient v6 integration", () => {
       txData: "0xabc",
       to: "0xrouter",
       value: "0",
-      userWalletAddress: "0x1111111111111111111111111111111111111111",
+      userWalletAddress: TEST_WALLET,
     });
 
     expect(result.txHash).toBe("0xrelay-tx");
@@ -826,7 +984,90 @@ describe("OnchainOsClient v6 integration", () => {
     expect(client.getIntegrationStatus().lastSubmitChannel).toBe("private-relay");
   });
 
-  it("falls back to serial + hedge when atomic bundle submit is unavailable", async () => {
+  it("does not fall back to serial dual-leg when atomic bundle submit is unavailable by default", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "alphaos-no-serial-fallback-"));
+    tempDirs.push(tempDir);
+    const store = new StateStore(tempDir);
+    stores.push(store);
+
+    let quoteCount = 0;
+    let swapCount = 0;
+    let broadcastCount = 0;
+    const mockFetch = vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
+      const url = new URL(String(input));
+      const pathname = url.pathname;
+      const symbol = url.searchParams.get("tokenSymbol");
+      const from = url.searchParams.get("fromTokenAddress");
+      const to = url.searchParams.get("toTokenAddress");
+
+      if (pathname.includes("/market/token/profile/current")) {
+        if (symbol === "USDC") {
+          return jsonResponse({ data: [{ tokenContractAddress: "0xusdc", tokenDecimal: "6" }] });
+        }
+        return jsonResponse({ data: [{ tokenContractAddress: "0xeth", tokenDecimal: "18" }] });
+      }
+      if (pathname.includes("/aggregator/quote")) {
+        quoteCount += 1;
+        if (from === "0xusdc" && to === "0xeth") {
+          return jsonResponse({
+            data: [{ fromTokenAmount: "1000000", toTokenAmount: "2000000000000000", dexRouterList: [{ dexName: "dex-a" }] }],
+          });
+        }
+        return jsonResponse({
+          data: [{ fromTokenAmount: "2000000000000000", toTokenAmount: "1005000", dexRouterList: [{ dexName: "dex-b" }] }],
+        });
+      }
+      if (pathname.includes("/aggregator/swap")) {
+        swapCount += 1;
+        return jsonResponse({ data: [{ txData: `0xswap-${swapCount}`, to: "0xrouter", value: "0" }] });
+      }
+      if (pathname.includes("/broadcast-transaction")) {
+        const body = JSON.parse(String(init?.body ?? "{}")) as { bundleTxs?: Array<{ txData?: string }> };
+        expect(body.bundleTxs?.length).toBe(2);
+        broadcastCount += 1;
+        return jsonResponse({ code: "NOT_SUPPORTED", msg: "bundle unsupported" }, 404);
+      }
+      return jsonResponse({ code: "404" }, 404);
+    });
+    globalThis.fetch = mockFetch as unknown as typeof fetch;
+
+    const client = new OnchainOsClient({
+      apiBase: "http://localhost:9999",
+      apiKey: "k1",
+      authMode: "bearer",
+      apiKeyHeader: "X-API-Key",
+      gasUsdDefault: 1,
+      chainIndex: "196",
+      requireSimulate: false,
+      enableCompatFallback: false,
+      tokenCacheTtlSeconds: 600,
+      tokenProfilePath: "/api/v6/market/token/profile/current",
+      store,
+      userWalletAddress: TEST_WALLET,
+    });
+
+    const result = await client.executePlan({
+      opportunityId: "opp-no-serial-fallback",
+      strategyId: "dex-arbitrage",
+      pair: "ETH/USDC",
+      buyDex: "dex-a",
+      sellDex: "dex-b",
+      buyPrice: 100,
+      sellPrice: 101,
+      notionalUsd: 1,
+    });
+
+    const alerts = store.listAlerts(5);
+    expect(result.success).toBe(false);
+    expect(result.errorType).toBe("network");
+    expect(quoteCount).toBe(2);
+    expect(swapCount).toBe(2);
+    expect(broadcastCount).toBe(1);
+    expect(alerts.some((alert) => alert.eventType === "atomic_dual_leg_fallback")).toBe(false);
+    expect(alerts.some((alert) => alert.eventType === "dual_leg_partial_fill")).toBe(false);
+  });
+
+  it("falls back to serial + hedge when atomic bundle submit is unavailable and explicitly enabled", async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "alphaos-partial-"));
     tempDirs.push(tempDir);
     const store = new StateStore(tempDir);
@@ -903,6 +1144,8 @@ describe("OnchainOsClient v6 integration", () => {
       tokenCacheTtlSeconds: 600,
       tokenProfilePath: "/api/v6/market/token/profile/current",
       store,
+      allowSerialDualLeg: true,
+      userWalletAddress: TEST_WALLET,
     });
 
     const result = await client.executePlan({

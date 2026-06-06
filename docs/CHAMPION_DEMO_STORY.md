@@ -313,9 +313,9 @@ Judge reaction target:
 
 ## Scene 4 - "Safe, explainable action" (40-60 seconds)
 
-Now show the paper-mode result.
+Now show the paper-mode result through the production approval route.
 
-Use the existing demo-safe route and show:
+Use `/api/v1/discovery/sessions/:sessionId/approve` with `mode=paper` and show:
 
 - moduleResponse
 - requested vs effective mode
@@ -324,7 +324,7 @@ Use the existing demo-safe route and show:
 - simulation summary
 - execution summary in paper mode
 
-If a live-like request is shown, the system should safely downgrade to paper and explain why.
+If a live request is shown, the runtime must use the same live gates and backend readiness checks used in production.
 
 Say:
 

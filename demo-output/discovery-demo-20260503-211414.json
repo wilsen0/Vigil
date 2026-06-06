@@ -1,0 +1,13 @@
+{
+  "capturedAt": "2026-05-03T21:14:29+08:00",
+  "baseUrl": "http://127.0.0.1:3000",
+  "strategy": "spread-threshold",
+  "pairsCsv": "ETH/USDC,BTC/USDC",
+  "sessionId": "5091ad2e-1841-4603-a75d-3dae27ee1117",
+  "session": {"id":"5091ad2e-1841-4603-a75d-3dae27ee1117","strategyId":"spread-threshold","status":"failed","pairs":["ETH/USDC","BTC/USDC"],"startedAt":"2026-05-03T13:14:14.157Z","plannedEndAt":"2026-05-03T14:14:14.157Z","endedAt":"2026-05-03T13:14:15.548Z","config":{"strategyId":"spread-threshold","pairs":["ETH/USDC","BTC/USDC"],"durationMinutes":60,"sampleIntervalSec":30,"topN":20,"lookbackSamples":100,"zEnter":2,"volRatioMin":0.5,"minSpreadBps":20,"notionalUsd":10000},"summary":{"strategyId":"spread-threshold","startedAt":"2026-05-03T13:14:14.157Z","endedAt":"2026-05-03T13:14:15.548Z","pairs":["ETH/USDC","BTC/USDC"],"status":"failed","samples":0,"candidates":0}},
+  "candidates": {"items":[]},
+  "report": {"sessionId":"5091ad2e-1841-4603-a75d-3dae27ee1117","generatedAt":"2026-05-03T13:14:15.555Z","summary":{"strategyId":"spread-threshold","startedAt":"2026-05-03T13:14:14.157Z","endedAt":"2026-05-03T13:14:15.548Z","pairs":["ETH/USDC","BTC/USDC"],"status":"failed","samples":0,"candidates":0},"topCandidates":[],"charts":{}},
+  "approvedCandidateId": null,
+  "approveResult": null,
+  "stopResult": {"id":"5091ad2e-1841-4603-a75d-3dae27ee1117","strategyId":"spread-threshold","status":"failed","pairs":["ETH/USDC","BTC/USDC"],"startedAt":"2026-05-03T13:14:14.157Z","plannedEndAt":"2026-05-03T14:14:14.157Z","endedAt":"2026-05-03T13:14:15.548Z","config":{"strategyId":"spread-threshold","pairs":["ETH/USDC","BTC/USDC"],"durationMinutes":60,"sampleIntervalSec":30,"topN":20,"lookbackSamples":100,"zEnter":2,"volRatioMin":0.5,"minSpreadBps":20,"notionalUsd":10000},"summary":{"strategyId":"spread-threshold","startedAt":"2026-05-03T13:14:14.157Z","endedAt":"2026-05-03T13:14:15.548Z","pairs":["ETH/USDC","BTC/USDC"],"status":"failed","samples":0,"candidates":0}}
+}

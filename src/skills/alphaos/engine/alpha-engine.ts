@@ -69,7 +69,7 @@ interface TradeExecutor {
     feeUsd: number;
     netUsd: number;
     error?: string;
-    errorType?: "permission_denied" | "whitelist_restricted" | "network" | "validation" | "unknown";
+    errorType?: "permission_denied" | "whitelist_restricted" | "network" | "validation" | "config_error" | "unknown";
     latencyMs?: number;
     slippageDeviationBps?: number;
   }>;
