@@ -1304,6 +1304,20 @@ function demoHtml(): string {
     .status.restricted { color: var(--warn); }
     .status.degraded { color: var(--bad); }
     .meta { margin-top: 8px; font-size: 12px; color: var(--muted); }
+    .discovery-card { grid-column: 1 / -1; }
+    .pipeline-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 8px; }
+    .pipeline-table th { text-align: left; color: var(--muted); padding: 4px 8px; border-bottom: 1px solid var(--line); }
+    .pipeline-table td { padding: 4px 8px; border-bottom: 1px solid rgba(255,255,255,0.06); }
+    .pipeline-table tr:hover { background: rgba(255,255,255,0.04); cursor: pointer; }
+    .status-active { color: var(--ok); }
+    .status-completed { color: #60a5fa; }
+    .status-stopped { color: var(--warn); }
+    .status-failed { color: var(--bad); }
+    .session-row { cursor: pointer; }
+    .session-row:hover { background: rgba(255,255,255,0.06); }
+    .session-detail { display: none; }
+    .session-detail.open { display: table-row; }
+    .pipeline-sub { margin: 4px 0; font-size: 11px; }
   </style>
 </head>
 <body>
@@ -1343,6 +1357,22 @@ function demoHtml(): string {
     </div>
   </div>
 
+  <div class="grid" style="margin-top:14px;">
+    <div class="card discovery-card">
+      <h2>Discovery Pipeline</h2>
+      <div id="discovery-active" class="meta">No active session</div>
+      <table class="pipeline-table">
+        <thead>
+          <tr><th>Strategy</th><th>Status</th><th>Pairs</th><th>Candidates</th><th>Top Pair</th><th>Started</th></tr>
+        </thead>
+        <tbody id="discovery-sessions">
+          <tr><td colspan="6" class="meta">Loading sessions...</td></tr>
+        </tbody>
+      </table>
+      <div id="discovery-pipeline"></div>
+    </div>
+  </div>
+
   <script>
     const el = {
       net: document.getElementById("net"),
@@ -1356,6 +1386,9 @@ function demoHtml(): string {
       moments: document.getElementById("moments"),
       probe: document.getElementById("probe"),
       feed: document.getElementById("feed"),
+      discoveryActive: document.getElementById("discovery-active"),
+      discoverySessions: document.getElementById("discovery-sessions"),
+      discoveryPipeline: document.getElementById("discovery-pipeline"),
     };
 
     const OFFICIAL_LABEL = {
@@ -1455,6 +1488,162 @@ function demoHtml(): string {
     refreshProbe();
     setInterval(refreshProbe, 30000);
 
+    let openSessionId = null;
+
+    function fmtTime(iso) {
+      if (!iso) return "";
+      const d = new Date(iso);
+      return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    }
+
+    function statusClass(status) {
+      return "status-" + (status || "failed");
+    }
+
+    function renderSessions(sessions) {
+      el.discoverySessions.replaceChildren();
+      if (!sessions || sessions.length === 0) {
+        const tr = document.createElement("tr");
+        const td = document.createElement("td");
+        td.colSpan = 6;
+        td.className = "meta";
+        td.textContent = "No discovery sessions yet";
+        tr.appendChild(td);
+        el.discoverySessions.appendChild(tr);
+        return;
+      }
+      for (const s of sessions) {
+        const tr = document.createElement("tr");
+        tr.className = "session-row";
+        const pairs = Array.isArray(s.pairs) ? s.pairs.join(", ") : "";
+        const cands = s.summary ? s.summary.candidates : 0;
+        const top = (s.summary && s.summary.topPair) || "—";
+        const cells = [s.strategyId || "unknown", s.status || "?", pairs, String(cands), top, fmtTime(s.startedAt)];
+        cells.forEach(function(text, i) {
+          const td = document.createElement("td");
+          td.textContent = text;
+          if (i === 1) td.className = statusClass(s.status);
+          tr.appendChild(td);
+        });
+        tr.addEventListener("click", function() { togglePipeline(s.id, tr); });
+        el.discoverySessions.appendChild(tr);
+
+        const detailTr = document.createElement("tr");
+        detailTr.className = "session-detail";
+        detailTr.id = "detail-" + s.id;
+        const detailTd = document.createElement("td");
+        detailTd.colSpan = 6;
+        const detailDiv = document.createElement("div");
+        detailDiv.className = "pipeline-sub";
+        detailDiv.textContent = "Loading pipeline...";
+        detailTd.appendChild(detailDiv);
+        detailTr.appendChild(detailTd);
+        el.discoverySessions.appendChild(detailTr);
+      }
+    }
+
+    function togglePipeline(sessionId, rowEl) {
+      const detail = document.getElementById("detail-" + sessionId);
+      if (!detail) return;
+      if (openSessionId === sessionId) {
+        detail.classList.remove("open");
+        openSessionId = null;
+        el.discoveryPipeline.replaceChildren();
+        return;
+      }
+      if (openSessionId) {
+        const prev = document.getElementById("detail-" + openSessionId);
+        if (prev) prev.classList.remove("open");
+      }
+      detail.classList.add("open");
+      openSessionId = sessionId;
+      loadPipeline(sessionId, detail);
+    }
+
+    function setDetailText(detailEl, text, cssClass) {
+      detailEl.replaceChildren();
+      const td = document.createElement("td");
+      td.colSpan = 6;
+      const div = document.createElement("div");
+      div.className = "pipeline-sub" + (cssClass ? " " + cssClass : "");
+      div.textContent = text;
+      td.appendChild(div);
+      detailEl.appendChild(td);
+    }
+
+    function loadPipeline(sessionId, detailEl) {
+      fetch("/api/v1/discovery/sessions/" + sessionId + "/pipeline")
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          const items = Array.isArray(data.items) ? data.items : [];
+          if (items.length === 0) {
+            setDetailText(detailEl, "No candidates in this session");
+            return;
+          }
+          const table = document.createElement("table");
+          table.className = "pipeline-table";
+          const thead = document.createElement("thead");
+          const headRow = document.createElement("tr");
+          ["Pair", "Score", "Expected Net", "Status", "Trade Net", "TxHash"].forEach(function(h) {
+            const th = document.createElement("th");
+            th.textContent = h;
+            headRow.appendChild(th);
+          });
+          thead.appendChild(headRow);
+          table.appendChild(thead);
+
+          const tbody = document.createElement("tbody");
+          for (const c of items) {
+            const tr = document.createElement("tr");
+            const netUsd = typeof c.tradeNetUsd === "number" ? c.tradeNetUsd.toFixed(4) : "—";
+            const tx = c.tradeTxHash ? c.tradeTxHash.slice(0, 10) + "..." : "—";
+            const vals = [c.pair, Number(c.score || 0).toFixed(1), Number(c.expectedNetUsd || 0).toFixed(4), c.status, netUsd, tx];
+            vals.forEach(function(text, i) {
+              const td = document.createElement("td");
+              td.textContent = text;
+              if (i === 3) td.className = statusClass(c.status);
+              tr.appendChild(td);
+            });
+            tbody.appendChild(tr);
+          }
+          table.appendChild(tbody);
+
+          detailEl.replaceChildren();
+          const td = document.createElement("td");
+          td.colSpan = 6;
+          td.appendChild(table);
+          detailEl.appendChild(td);
+
+          el.discoveryPipeline.replaceChildren();
+          const header = document.createElement("div");
+          header.className = "meta";
+          header.textContent = "Pipeline for session " + sessionId.slice(0, 8) + "... (" + items.length + " candidates)";
+          el.discoveryPipeline.appendChild(header);
+        })
+        .catch(function() {
+          setDetailText(detailEl, "Failed to load pipeline", "warn");
+        });
+    }
+
+    function renderDiscovery(discovery) {
+      if (!discovery) return;
+      if (discovery.activeSession) {
+        const s = discovery.activeSession;
+        const elapsed = Math.round((Date.now() - new Date(s.startedAt).getTime()) / 1000);
+        const total = Math.round((new Date(s.plannedEndAt).getTime() - new Date(s.startedAt).getTime()) / 1000);
+        const pairsText = Array.isArray(s.pairs) ? s.pairs.join(", ") : "";
+        el.discoveryActive.replaceChildren();
+        const label = document.createElement("span");
+        label.className = "status-active";
+        label.textContent = "Active: ";
+        el.discoveryActive.appendChild(label);
+        el.discoveryActive.appendChild(document.createTextNode(s.strategyId + " | " + pairsText + " | " + elapsed + "s / " + total + "s"));
+      } else {
+        el.discoveryActive.textContent = "No active session";
+      }
+      renderSessions(discovery.recentSessions || []);
+    }
+
     const stream = new EventSource("/api/v1/stream/metrics");
     stream.onmessage = (evt) => {
       const data = JSON.parse(evt.data);
@@ -1487,6 +1676,8 @@ function demoHtml(): string {
         const lines = data.moments.map((m) => "- " + String(m.title || "moment") + "\\n  " + String(m.text || ""));
         el.moments.textContent = lines.join("\\n");
       }
+
+      renderDiscovery(data.discovery);
 
       const line = "[" + new Date().toISOString() + "] net=" + Number(data.metrics.netUsd || 0).toFixed(2) + " trades=" + data.metrics.trades + " mode=" + data.mode;
       el.feed.textContent = (line + "\n" + el.feed.textContent).slice(0, 6000);
@@ -1852,12 +2043,22 @@ export function createServer(
     res.flushHeaders?.();
 
     const send = () => {
+      const discovery = options?.discoveryEngine;
+      const activeSession = discovery?.getActiveSession() ?? null;
+      const recentSessions = discovery
+        ? discovery.listSessions(5).filter((session) => session.status !== "active")
+        : [];
+
       const payload = {
         mode: engine.getCurrentMode(),
         metrics: store.getTodayMetrics(),
         strategies: store.listStrategyStatusToday(),
         share: store.getLatestShareCard(),
         moments: store.listGrowthMoments(3),
+        discovery: {
+          activeSession,
+          recentSessions,
+        },
       };
       res.write(`data: ${JSON.stringify(payload)}\n\n`);
     };
@@ -2113,6 +2314,15 @@ export function createServer(
     }
   });
 
+  app.get("/api/v1/discovery/sessions", (req, res) => {
+    const discovery = ensureDiscoveryEngine(res);
+    if (!discovery) {
+      return;
+    }
+    const limit = toLimit(req.query.limit, 20);
+    res.json({ items: discovery.listSessions(Math.min(limit, 100)) });
+  });
+
   app.get("/api/v1/discovery/sessions/active", (_req, res) => {
     const discovery = ensureDiscoveryEngine(res);
     if (!discovery) {
@@ -2149,6 +2359,14 @@ export function createServer(
       return;
     }
     res.json(report);
+  });
+
+  app.get("/api/v1/discovery/sessions/:sessionId/pipeline", (req, res) => {
+    const context = loadDiscoverySession(res, req.params.sessionId);
+    if (!context) {
+      return;
+    }
+    res.json({ items: context.discovery.getPipeline(context.sessionId) });
   });
 
   app.post("/api/v1/discovery/sessions/:sessionId/stop", async (req, res) => {

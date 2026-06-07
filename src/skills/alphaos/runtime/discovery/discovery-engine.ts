@@ -145,6 +145,14 @@ export class DiscoveryEngine {
     return this.store.listDiscoveryCandidates(sessionId, limit);
   }
 
+  listSessions(limit = 20): DiscoverySession[] {
+    return this.store.listDiscoverySessions(limit);
+  }
+
+  getPipeline(sessionId: string): import("../../types").DiscoveryPipelineItem[] {
+    return this.store.getDiscoveryPipeline(sessionId);
+  }
+
   getReport(sessionId: string) {
     return this.store.getDiscoveryReport(sessionId);
   }

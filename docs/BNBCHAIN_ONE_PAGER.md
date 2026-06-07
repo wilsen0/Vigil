@@ -130,8 +130,8 @@ This is the difference between “agent theater” and “agent operations”.
 A new MVP layer now makes Vigil proactive instead of purely reactive.
 
 - **Signal Radar** senses BNB ecosystem events before the user asks and normalizes them into `NormalizedSignal`.
-- **Contact Policy** decides whether and how to interrupt the user with a 6-level attention ladder (`silent` → `call_escalation`), plus quiet-hours degradation, rate limiting, and watchlist relevance checks.
-- **Voice Brief** delivers human-like One-Breath micro-briefings (max 15 seconds, max 3 sentences, `zh` / `en`) with protocol validation.
+- **Contact Policy** decides whether and how to interrupt the user with a 3-level attention model (`log` → `notify` → `call`), plus quiet-hours degradation, rate limiting, and watchlist relevance checks.
+- **Voice Brief** delivers human-like micro-briefings (max 15 seconds, max 3 sentences, `zh` / `en`) via LLM natural language generation with CosyVoice cloned voice.
 - **Demo mode** keeps the full evaluation loop paper-safe while still providing credible demonstrations through replayable scenarios and capsules.
 
 ---

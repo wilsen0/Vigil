@@ -529,10 +529,10 @@ The emotional takeaway should be:
 - adapter-backed normalized contexts
 - production approval flow with explicit paper/live mode
 - signal radar with normalized events (`NormalizedSignal`)
-- contact policy engine with 6-level attention ladder (`silent` → `call_escalation`)
+- contact policy engine with 3-level attention model (`log` → `notify` → `call`)
 - one-breath voice brief generation (`zh` / `en`)
 - loop orchestration (`signal -> policy -> brief`) with `demoMode`
-- delivery adapters (`Telegram` + webhook)
+- delivery adapters (`Telegram` + `Aliyun voice call` + webhook)
 - API routes: `/api/v1/living-assistant/evaluate`, `/api/v1/living-assistant/demo/:scenarioName`, `/api/v1/living-assistant/capsules`
 - demo scenario fixtures (`proactive-arbitrage-alert`, `quiet-hours-downgrade`, `critical-risk-escalation`)
 - signal capsule fixtures for replayable demos

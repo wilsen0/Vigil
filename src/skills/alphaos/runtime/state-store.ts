@@ -7,6 +7,7 @@ import type {
   BacktestSnapshotRow,
   DiscoveryCandidate,
   DiscoveryCandidateStatus,
+  DiscoveryPipelineItem,
   DiscoveryReport,
   DiscoverySample,
   DiscoverySession,
@@ -3085,6 +3086,102 @@ export class StateStore {
       return null;
     }
     return JSON.parse(row.reportJson) as DiscoveryReport;
+  }
+
+  listDiscoverySessions(limit = 20): DiscoverySession[] {
+    const rows = this.alphaDb
+      .prepare(
+        `SELECT id,
+                strategy_id AS strategyId,
+                status,
+                pairs_json AS pairsJson,
+                started_at AS startedAt,
+                planned_end_at AS plannedEndAt,
+                ended_at AS endedAt,
+                config_json AS configJson,
+                summary_json AS summaryJson
+         FROM discovery_sessions
+         ORDER BY started_at DESC
+         LIMIT ?`,
+      )
+      .all(limit) as Array<{
+        id: string;
+        strategyId: DiscoveryStrategyId;
+        status: DiscoverySessionStatus;
+        pairsJson: string;
+        startedAt: string;
+        plannedEndAt: string;
+        endedAt: string | null;
+        configJson: string;
+        summaryJson: string | null;
+      }>;
+    return rows.map((row) => this.toDiscoverySession(row));
+  }
+
+  getDiscoveryPipeline(sessionId: string): DiscoveryPipelineItem[] {
+    const rows = this.alphaDb
+      .prepare(
+        `SELECT c.id, c.session_id AS sessionId, c.strategy_id AS strategyId,
+                c.pair, c.buy_dex AS buyDex, c.sell_dex AS sellDex,
+                c.signal_ts AS signalTs, c.score, c.expected_net_bps AS expectedNetBps,
+                c.expected_net_usd AS expectedNetUsd, c.confidence, c.reason,
+                c.input_json AS inputJson, c.status, c.approved_at AS approvedAt,
+                c.executed_trade_id AS executedTradeId,
+                t.tx_hash AS tradeTxHash, t.gross_usd AS tradeGrossUsd,
+                t.fee_usd AS tradeFeeUsd, t.net_usd AS tradeNetUsd,
+                t.status AS tradeStatus
+         FROM discovery_candidates c
+         LEFT JOIN trades t ON t.id = c.executed_trade_id
+         WHERE c.session_id = ?
+         ORDER BY c.score DESC`,
+      )
+      .all(sessionId) as Array<{
+        id: string;
+        sessionId: string;
+        strategyId: DiscoveryStrategyId;
+        pair: string;
+        buyDex: string;
+        sellDex: string;
+        signalTs: string;
+        score: number;
+        expectedNetBps: number;
+        expectedNetUsd: number;
+        confidence: number;
+        reason: string;
+        inputJson: string;
+        status: DiscoveryCandidateStatus;
+        approvedAt: string | null;
+        executedTradeId: string | null;
+        tradeTxHash: string | null;
+        tradeGrossUsd: number | null;
+        tradeFeeUsd: number | null;
+        tradeNetUsd: number | null;
+        tradeStatus: string | null;
+      }>;
+
+    return rows.map((row) => ({
+      id: row.id,
+      sessionId: row.sessionId,
+      strategyId: row.strategyId,
+      pair: row.pair,
+      buyDex: row.buyDex,
+      sellDex: row.sellDex,
+      signalTs: row.signalTs,
+      score: row.score,
+      expectedNetBps: row.expectedNetBps,
+      expectedNetUsd: row.expectedNetUsd,
+      confidence: row.confidence,
+      reason: row.reason,
+      input: row.inputJson ? JSON.parse(row.inputJson) : {},
+      status: row.status,
+      ...(row.approvedAt ? { approvedAt: row.approvedAt } : {}),
+      ...(row.executedTradeId ? { executedTradeId: row.executedTradeId } : {}),
+      ...(row.tradeTxHash ? { tradeTxHash: row.tradeTxHash } : {}),
+      ...(row.tradeGrossUsd !== null ? { tradeGrossUsd: row.tradeGrossUsd } : {}),
+      ...(row.tradeFeeUsd !== null ? { tradeFeeUsd: row.tradeFeeUsd } : {}),
+      ...(row.tradeNetUsd !== null ? { tradeNetUsd: row.tradeNetUsd } : {}),
+      ...(row.tradeStatus ? { tradeStatus: row.tradeStatus } : {}),
+    }));
   }
 
   insertMarketSnapshot(input: { pair: string; dex: string; bid: number; ask: number; ts: string }): void {

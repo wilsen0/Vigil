@@ -18,7 +18,7 @@ If you only open a few files, use this order:
 
 - **Living Assistant** = sensing + interruption judgment + briefing loop.
 - **Signal Radar** = ecosystem signal ingestion layer.
-- **Contact Policy** = policy engine that decides `silent -> call_escalation`.
+- **Contact Policy** = policy engine that decides `log` / `notify` / `call`.
 - **Voice Brief** = short user-facing voice summary.
 - **Execution** = paper-first execution and risk-control loop.
 - **Agent-Comm** = wallet-based trust and communication layer.
@@ -68,7 +68,7 @@ graph TB
     subgraph Delivery Layer
         TG[Telegram<br/>text + inline keyboard]
         VC[CosyVoice TTS<br/>cloned voice ≤15s]
-        TW[Twilio<br/>call escalation]
+        TW[Aliyun<br/>call escalation]
     end
 
     subgraph Trust Layer
@@ -82,10 +82,9 @@ graph TB
     TI --> SR
     SR --> LLM
     LLM --> CP
-    CP -->|silent / digest| DROP[Suppress or batch]
-    CP -->|text_nudge| TG
-    CP -->|voice_brief| VC
-    CP -->|call_escalation| TW
+    CP -->|log| DROP[Suppress or batch]
+    CP -->|notify| TG
+    CP -->|call| VC
     CP -->|execution trigger| PE
     PE --> RE
     RE --> SIM
@@ -146,7 +145,7 @@ export API_SECRET="<your API_SECRET value>"
 
 - `npm run demo:living-assistant -- --live`（实时信号轮询），
 - 执行后端集成（需要配置相关 credentials），
-- 真实投递（`--send` / `--call` 需要有效的 Telegram / Twilio / 阿里云凭证）。
+- 真实投递（`--send` / `--call` 需要有效的 Telegram / 阿里云凭证）。
 
 **验证路径**（本地即可运行）：
 

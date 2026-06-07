@@ -268,6 +268,14 @@ export interface DiscoveryApproveResult {
   tradeId?: string;
 }
 
+export interface DiscoveryPipelineItem extends DiscoveryCandidate {
+  tradeTxHash?: string;
+  tradeGrossUsd?: number;
+  tradeFeeUsd?: number;
+  tradeNetUsd?: number;
+  tradeStatus?: string;
+}
+
 export interface StrategyProfile {
   strategyId: string;
   variant: "A" | "B";

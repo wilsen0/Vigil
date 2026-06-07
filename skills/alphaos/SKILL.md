@@ -30,6 +30,15 @@ Core arbitrage engine. Runs a tick loop that scans DEX quotes, evaluates spread 
   - `network-profile.ts` / `network-profile-probe.ts` — execution readiness assessment
   - `logger.ts` — structured logging (pino)
   - `time.ts` — time utilities
+- `src/skills/alphaos/living-assistant/` — proactive notification system:
+  - `contact-policy/` — 3-level decision engine (`log` / `notify` / `call`)
+  - `delivery/` — Telegram + Aliyun voice call sender, callback handler
+  - `voice-brief/` — voice brief generation (template + LLM natural language)
+  - `llm/` — LLM client (DashScope/Qwen) for brief generation
+  - `digest-batching/` — low-priority signal batching scheduler
+  - `signal-radar/` — Binance announcement / Square pollers
+  - `tts/` — TTS providers (CosyVoice, DashScope Qwen, OpenAI-compatible)
+  - `loop.ts` — main orchestration loop (policy → brief → TTS → delivery)
 
 ## Engine Tick Loop
 
@@ -110,6 +119,22 @@ GET  /api/v1/backtest/snapshot   — export historical data (JSON/CSV)
 POST /api/v1/replay/sandbox      — deterministic risk replay
 ```
 
+### Discovery Pipeline
+```
+GET  /api/v1/discovery/sessions              — list all sessions (history)
+GET  /api/v1/discovery/sessions/:id/pipeline  — candidates + trade results
+GET  /api/v1/discovery/sessions/:id/report    — full report (summary + charts)
+POST /api/v1/discovery/sessions/:id/approve   — approve → simulate → execute
+```
+
+### Living Assistant
+```
+POST /api/v1/living-assistant/evaluate        — evaluate signal → decision + brief
+GET  /api/v1/living-assistant/demo/:scenario  — run demo scenario
+GET  /api/v1/living-assistant/digest/status   — digest queue status
+POST /api/v1/living-assistant/digest/flush    — flush digest queue
+```
+
 ### Execution Backend Health
 ```
 POST /api/v1/integration/execution/probe — execution path health check
@@ -139,6 +164,33 @@ VAULT_MASTER_PASSWORD=xxx npx tsx src/index.ts vault:get <alias>
 OpenClaw webhook format:
 ```
 [alphaos][{mode}][{level}] {event} pair={pair} net={netUsd} tx={txHash|na}
+```
+
+## Living Assistant
+
+Proactive notification system. Monitors BNB ecosystem signals (Binance announcements, Square posts) and decides whether/how to interrupt the user.
+
+### 3-Level Attention Model
+
+| Level | Channel | Trigger |
+|-------|---------|---------|
+| `log` | none (silent) | Low/medium urgency, not on watchlist, quiet hours, rate limited |
+| `notify` | Telegram text/voice | High urgency + relevant, or critical + not relevant |
+| `call` | Aliyun phone + Telegram urgent + inline buttons | Critical urgency + relevant (or `allowCallEscalation`) |
+
+Built-in quiet hours degradation (default 23:00–08:00), rate limiting (max 3/hour, 12/day), and watchlist relevance matching.
+
+### Delivery Channels
+
+- **Telegram**: text messages, voice messages, inline keyboard buttons (act_now / defer_5m / ignore)
+- **Aliyun Voice Call**: TTS phone call for critical escalations
+
+### Data Flow
+
+```
+Signal → evaluateContactPolicy → generateNaturalBrief (LLM) → TTS → executeDelivery
+                                                    ↓
+                                          DigestBatchScheduler (for log-level)
 ```
 
 ## Demo Scripts

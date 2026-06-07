@@ -5,7 +5,7 @@
 在当前仓库里，Living Assistant 已经从蓝图变成可运行能力（Phase 1-6 代码与验证路径已落地）：
 
 1. 不是等用户问，而是主动感知 BNB 生态信号（Signal Radar），并统一归一化为 `NormalizedSignal`。
-2. 通过 6 级注意力阶梯决定是否打扰用户（`silent` → `call_escalation`），内置 quiet hours 降级、频率限制、watchlist 相关性判断。
+2. 通过 3 级注意力模型决定是否打扰用户（`log` → `notify` → `call`），内置 quiet hours 降级、频率限制、watchlist 相关性判断。
 3. **LLM 驱动的信号审核**：当前仓库样例为 80 条 Binance 公告 → 8 条通知 / 12 条摘要 / 60 条跳过（约 87% 降噪）。同类信号自动聚合（如 3 条 new_listing → 1 条摘要）。LLM 不可用时自动降级到规则引擎。
 4. **自然语言语音简报**：核心路径不依赖模板拼接，由 LLM 生成口语化简报（目标约束：≤3 句话、15 秒内），配合 CosyVoice 克隆音色合成。
 5. 仓库内验证路径已覆盖主链路：信号感知 → LLM 审核 → 自然语言简报 → CosyVoice 克隆音色语音播报 → Telegram 投递（语音+交互按钮）→ 用户响应 → 回调处理 → 消息状态更新。

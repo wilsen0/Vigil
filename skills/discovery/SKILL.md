@@ -7,22 +7,38 @@ description: Multi-strategy opportunity discovery engine for DEX pair scanning. 
 
 Autonomous market scanning engine that runs time-bounded sessions to find actionable DEX opportunities using pluggable statistical strategies.
 
+## Data Chain
+
+```
+Session → Candidates → Approve → Opportunity → Trade
+ (entry)   (discover)  (decide)   (validate)   (execute)
+```
+
+Every stage is queryable. The **pipeline** endpoint joins candidates with their trade results in a single view.
+
 ## Code Location
 
 All runtime code lives in `src/skills/alphaos/runtime/discovery/`. Key files:
 
-- `discovery-engine.ts` — session lifecycle, tick loop, candidate ranking
+- `discovery-engine.ts` — session lifecycle, tick loop, candidate ranking, pipeline queries
 - `report-builder.ts` — generates structured reports with charts and summaries
 - `strategies/types.ts` — strategy interface + shared math utilities (mean, stdDev, percentileRank)
 - `strategies/spread-threshold.ts` — static threshold strategy
 - `strategies/mean-reversion.ts` — z-score based mean reversion
 - `strategies/volatility-breakout.ts` — volatility ratio breakout
 
+Supporting files:
+
+- `src/skills/alphaos/types.ts` — `DiscoverySession`, `DiscoveryCandidate`, `DiscoveryReport`, `DiscoveryPipelineItem`, `ChartPoint`
+- `src/skills/alphaos/runtime/state-store.ts` — SQLite persistence for sessions, samples, candidates, reports, pipeline queries
+
 ## Core Concepts
 
 **Session**: a time-bounded scan across one or more pairs with a chosen strategy. Produces ranked candidates.
 
-**Candidate**: a discovered opportunity with pair, strategy scores, expected edge, and approval status.
+**Candidate**: a discovered opportunity with pair, strategy scores, expected edge, and approval status (`pending` → `approved` → `executed` / `failed` / `rejected`).
+
+**Pipeline**: a candidate joined with its trade result — score, status, txHash, netUsd. One query, full traceability.
 
 **Report**: aggregated session results — top candidates, spread charts, summary stats.
 
@@ -34,11 +50,31 @@ start session → tick loop (sample quotes → compute spread/vol/z-score → ev
 
 ## API Endpoints
 
+### Session Management
 ```
-POST /api/v1/discovery/start     — start a new session
-GET  /api/v1/discovery/sessions  — list sessions
-GET  /api/v1/discovery/report/:id — get session report
-POST /api/v1/discovery/approve   — approve candidate for execution
+POST /api/v1/discovery/sessions/start       — start a new session
+GET  /api/v1/discovery/sessions             — list all sessions (history)
+GET  /api/v1/discovery/sessions/active      — current active session
+GET  /api/v1/discovery/sessions/:id         — session details + summary
+POST /api/v1/discovery/sessions/:id/stop    — stop session (idempotent)
+```
+
+### Discovery Data
+```
+GET  /api/v1/discovery/sessions/:id/candidates — candidate list (ranked by score)
+GET  /api/v1/discovery/sessions/:id/pipeline   — candidates + trade results (unified view)
+GET  /api/v1/discovery/sessions/:id/report     — full report (summary + charts)
+```
+
+### Execution
+```
+POST /api/v1/discovery/sessions/:id/approve — approve candidate → simulate → execute
+```
+
+### Real-time
+```
+GET  /api/v1/stream/metrics                — SSE stream (includes discovery.activeSession + recentSessions)
+GET  /demo                                 — browser dashboard with Discovery Pipeline panel
 ```
 
 ## CLI (via agent-comm)
@@ -125,5 +161,4 @@ npm run demo:discovery    # runs discovery-demo.sh → outputs to demo-output/
 
 ## Docs
 
-- `docs/OPENCLAW_DISCOVERY_PLAYBOOK.md` — OpenClaw integration for discovery orchestration
 - `docs/ALGORITHM.md` — algorithm details (Chinese)
