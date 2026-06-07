@@ -1,17 +1,14 @@
-import type { ContactDecision } from "../contact-policy";
+import type { AttentionLevel, ContactDecision } from "../contact-policy";
 import type { TTSResult } from "../tts";
 import type { VoiceBrief } from "../voice-brief";
-import type { TelegramInlineKeyboardButton, TelegramVoiceSendResult } from "./telegram-voice-sender";
+import type { AliyunVoiceConfig, AliyunVoiceResult } from "./aliyun-voice-sender";
+import { AliyunVoiceSender } from "./aliyun-voice-sender";
+import type { TelegramVoiceSendResult, TelegramVoiceSenderConfig } from "./telegram-voice-sender";
 import { TelegramVoiceSender } from "./telegram-voice-sender";
-import type { VoiceDeliveryResult } from "./voice-orchestrator";
-import { VoiceDeliveryOrchestrator } from "./voice-orchestrator";
 
 export interface DeliveryExecutorConfig {
   telegramSender?: TelegramVoiceSender;
-  voiceOrchestrator?: VoiceDeliveryOrchestrator;
-  voiceOrchestratorOptions?: {
-    demoMode?: boolean;
-  };
+  aliyunSender?: AliyunVoiceSender;
   dryRun?: boolean;
 }
 
@@ -21,72 +18,8 @@ export interface DeliveryResult {
   dryRun: boolean;
   voiceResult?: TelegramVoiceSendResult;
   textResult?: TelegramVoiceSendResult;
-  orchestratorResults?: VoiceDeliveryResult[];
+  callResult?: AliyunVoiceResult;
   error?: string;
-}
-
-function summarizeActions(actions?: string[]): string {
-  const normalized = actions?.map((action) => action.trim()).filter((action) => action.length > 0) ?? [];
-  if (normalized.length === 0) {
-    return "Suggested actions:\n1. Acknowledge this alert\n2. Review live positions\n3. Decide to execute or defer";
-  }
-
-  const rows = normalized.map((action, index) => `${index + 1}. ${action.replace(/_/g, " ")}`);
-  return `Suggested actions:\n${rows.join("\n")}`;
-}
-
-function strongInterruptFollowUp(decision: ContactDecision): string {
-  return [
-    `Strong interrupt context: ${decision.reason}`,
-    summarizeActions(decision.suggestedActions),
-  ].join("\n\n");
-}
-
-function escalationFollowUp(decision: ContactDecision): string {
-  const cooldownLine = decision.cooldownUntil
-    ? `Cooldown until: ${decision.cooldownUntil}`
-    : "Cooldown until: immediate reassessment";
-  return [
-    "Escalation plan:",
-    "1. Acknowledge this message now.",
-    "2. Open the strategy console and verify risk controls.",
-    "3. Execute the safest mitigation path or pause the strategy.",
-    cooldownLine,
-  ].join("\n");
-}
-
-function toInlineKeyboard(decision: ContactDecision): TelegramInlineKeyboardButton[][] | undefined {
-  const actions = decision.suggestedActions?.slice(0, 3) ?? ["act_now", "defer_5m", "ignore_once"];
-  if (actions.length === 0) return undefined;
-  return [actions.map((action) => ({
-    text: action.replace(/_/g, " "),
-    callback_data: `la:${action}`,
-  }))];
-}
-
-function toErrorMessage(results: TelegramVoiceSendResult[]): string | undefined {
-  const failures = results.filter((result) => !result.ok).map((result) => result.error).filter(Boolean);
-  if (failures.length === 0) {
-    return undefined;
-  }
-  return failures.join(" | ");
-}
-
-function toOrchestratorError(results: VoiceDeliveryResult[]): string | undefined {
-  const failures = results
-    .filter((result) => !result.ok)
-    .map((result) => {
-      const detail = result.detail as { error?: string };
-      if (typeof detail.error === "string" && detail.error.trim().length > 0) {
-        return `${result.channel}: ${detail.error}`;
-      }
-      return `${result.channel}: unknown error`;
-    });
-
-  if (failures.length === 0) {
-    return undefined;
-  }
-  return failures.join(" | ");
 }
 
 function hasAudioBytes(audio?: TTSResult): audio is TTSResult & { audio: Buffer } {
@@ -97,22 +30,12 @@ function hasAudioUrl(audio?: TTSResult): audio is TTSResult & { audioUrl: string
   return Boolean(audio?.audioUrl && audio.audioUrl.trim().length > 0);
 }
 
-/**
- * Resolve audio bytes from a TTSResult.
- * If bytes are already present, return them directly.
- * If only audioUrl is available, download the audio.
- * Returns undefined if no audio is available.
- */
 async function resolveAudioBytes(audio?: TTSResult): Promise<Buffer | undefined> {
-  if (hasAudioBytes(audio)) {
-    return audio.audio;
-  }
+  if (hasAudioBytes(audio)) return audio.audio;
   if (hasAudioUrl(audio)) {
     try {
       const response = await fetch(audio.audioUrl);
-      if (!response.ok) {
-        return undefined;
-      }
+      if (!response.ok) return undefined;
       const arrayBuffer = await response.arrayBuffer();
       return Buffer.from(arrayBuffer);
     } catch {
@@ -122,83 +45,38 @@ async function resolveAudioBytes(audio?: TTSResult): Promise<Buffer | undefined>
   return undefined;
 }
 
+function toInlineKeyboard(decision: ContactDecision): import("./telegram-voice-sender").TelegramInlineKeyboardButton[][] {
+  return [
+    [
+      { text: "act now", callback_data: "la:act_now" },
+      { text: "defer 5m", callback_data: "la:defer_5m" },
+      { text: "ignore", callback_data: "la:ignore_once" },
+    ],
+  ];
+}
+
 export async function executeDelivery(
   decision: ContactDecision,
   brief?: VoiceBrief,
   audio?: TTSResult,
   config?: DeliveryExecutorConfig,
 ): Promise<DeliveryResult> {
-  if (decision.attentionLevel === "silent" || decision.attentionLevel === "digest") {
-    return {
-      channel: "none",
-      sent: false,
-      dryRun: false,
-    };
+  if (decision.attentionLevel === "log") {
+    return { channel: "none", sent: false, dryRun: false };
   }
 
   if (config?.dryRun) {
-    return {
-      channel: decision.channels[0] ?? "none",
-      sent: false,
-      dryRun: true,
-    };
-  }
-
-  const voiceOrchestrator = config?.voiceOrchestrator;
-  const shouldUseVoiceOrchestrator =
-    Boolean(voiceOrchestrator) &&
-    (decision.attentionLevel === "strong_interrupt" || decision.attentionLevel === "call_escalation");
-  if (shouldUseVoiceOrchestrator && voiceOrchestrator) {
-    const briefText = brief?.text ?? decision.reason;
-    const payload = {
-      text: briefText,
-      ...(hasAudioBytes(audio) ? { audio: audio.audio, audioFormat: audio.format } : {}),
-      ...(hasAudioUrl(audio) ? { audioUrl: audio.audioUrl } : {}),
-    };
-    const orchestratorOptions = config?.voiceOrchestratorOptions;
-    const orchestratorResults = orchestratorOptions
-      ? await voiceOrchestrator.deliver(decision.attentionLevel, payload, orchestratorOptions)
-      : await voiceOrchestrator.deliver(decision.attentionLevel, payload);
-    const firstSuccess = orchestratorResults.find((result) => result.ok)?.channel;
-    const firstAttempt = orchestratorResults[0]?.channel;
-    const sent = orchestratorResults.some((result) => result.ok);
-    const error =
-      sent || orchestratorResults.length === 0
-        ? undefined
-        : toOrchestratorError(orchestratorResults) ?? "voice delivery failed";
-
-    return {
-      channel: firstSuccess ?? firstAttempt ?? "voice",
-      sent,
-      dryRun: false,
-      orchestratorResults,
-      ...(error ? { error } : {}),
-    };
+    return { channel: decision.attentionLevel === "call" ? "aliyun" : "telegram", sent: false, dryRun: true };
   }
 
   const sender = config?.telegramSender;
-  if (!sender) {
-    return {
-      channel: "telegram",
-      sent: false,
-      dryRun: true,
-    };
-  }
-
   const briefText = brief?.text ?? decision.reason;
 
-  if (decision.attentionLevel === "text_nudge") {
-    const textResult = await sender.sendText(decision.reason);
-    return {
-      channel: "telegram",
-      sent: textResult.ok,
-      dryRun: false,
-      textResult,
-      ...(textResult.ok ? {} : { error: textResult.error }),
-    };
-  }
+  if (decision.attentionLevel === "notify") {
+    if (!sender) {
+      return { channel: "telegram", sent: false, dryRun: true };
+    }
 
-  if (decision.attentionLevel === "voice_brief") {
     const audioBytes = await resolveAudioBytes(audio);
     if (audioBytes) {
       const voiceResult = await sender.sendVoice(audioBytes, { caption: briefText });
@@ -211,7 +89,7 @@ export async function executeDelivery(
       };
     }
 
-    const textResult = await sender.sendText(briefText);
+    const textResult = await sender.sendMessage(briefText);
     return {
       channel: "telegram",
       sent: textResult.ok,
@@ -221,64 +99,62 @@ export async function executeDelivery(
     };
   }
 
-  if (decision.attentionLevel === "strong_interrupt") {
-    const followUpText = strongInterruptFollowUp(decision);
-    const keyboard = toInlineKeyboard(decision);
+  // call level: Telegram voice/text + phone call
+  const keyboard = toInlineKeyboard(decision);
+  let voiceResult: TelegramVoiceSendResult | undefined;
+  let textResult: TelegramVoiceSendResult | undefined;
+  let callResult: AliyunVoiceResult | undefined;
+
+  if (sender) {
     const audioBytes = await resolveAudioBytes(audio);
     if (audioBytes) {
-      const combined = await sender.sendVoiceWithFollowUp(audioBytes, briefText, followUpText, { inlineKeyboard: keyboard });
-      return {
-        channel: "telegram",
-        sent: combined.voice.ok && combined.followUp.ok,
-        dryRun: false,
-        voiceResult: combined.voice,
-        textResult: combined.followUp,
-        ...(combined.voice.ok && combined.followUp.ok
-          ? {}
-          : { error: toErrorMessage([combined.voice, combined.followUp]) }),
-      };
+      const combined = await sender.sendVoiceWithFollowUp(
+        audioBytes,
+        `URGENT: ${briefText}`,
+        buildEscalationText(decision),
+        { inlineKeyboard: keyboard },
+      );
+      voiceResult = combined.voice;
+      textResult = combined.followUp;
+    } else {
+      voiceResult = await sender.sendMessage(`URGENT: ${briefText}`);
+      textResult = await sender.sendMessage(buildEscalationText(decision), { inlineKeyboard: keyboard });
     }
-
-    const voiceFallbackText = await sender.sendText(briefText);
-    const followUp = await sender.sendMessage(followUpText, { inlineKeyboard: keyboard });
-    return {
-      channel: "telegram",
-      sent: voiceFallbackText.ok && followUp.ok,
-      dryRun: false,
-      voiceResult: voiceFallbackText,
-      textResult: followUp,
-      ...(voiceFallbackText.ok && followUp.ok
-        ? {}
-        : { error: toErrorMessage([voiceFallbackText, followUp]) }),
-    };
   }
 
-  const escalationText = escalationFollowUp(decision);
-  const urgentCaption = `URGENT: ${briefText}`;
-  const keyboard = toInlineKeyboard(decision);
-  const audioBytes = await resolveAudioBytes(audio);
-  if (audioBytes) {
-    const combined = await sender.sendVoiceWithFollowUp(audioBytes, urgentCaption, escalationText, { inlineKeyboard: keyboard });
-    return {
-      channel: "telegram",
-      sent: combined.voice.ok && combined.followUp.ok,
-      dryRun: false,
-      voiceResult: combined.voice,
-      textResult: combined.followUp,
-      ...(combined.voice.ok && combined.followUp.ok
-        ? {}
-        : { error: toErrorMessage([combined.voice, combined.followUp]) }),
-    };
+  if (config?.aliyunSender) {
+    callResult = await config.aliyunSender.callWithTts({ content: briefText });
   }
 
-  const urgentText = await sender.sendText(urgentCaption);
-  const planText = await sender.sendMessage(escalationText, { inlineKeyboard: keyboard });
+  const telegramOk = voiceResult?.ok && textResult?.ok;
+  const callOk = callResult?.ok;
+  const sent = Boolean(telegramOk || callOk);
+  const errors = [
+    voiceResult?.ok === false ? voiceResult.error : undefined,
+    textResult?.ok === false ? textResult.error : undefined,
+    callResult?.ok === false ? callResult.error : undefined,
+  ].filter(Boolean);
+
   return {
-    channel: "telegram",
-    sent: urgentText.ok && planText.ok,
+    channel: callOk ? "aliyun" : "telegram",
+    sent,
     dryRun: false,
-    voiceResult: urgentText,
-    textResult: planText,
-    ...(urgentText.ok && planText.ok ? {} : { error: toErrorMessage([urgentText, planText]) }),
+    voiceResult,
+    textResult,
+    callResult,
+    ...(sent ? {} : { error: errors.join(" | ") || "delivery failed" }),
   };
+}
+
+function buildEscalationText(decision: ContactDecision): string {
+  const cooldownLine = decision.cooldownUntil
+    ? `Cooldown until: ${decision.cooldownUntil}`
+    : "Cooldown until: immediate reassessment";
+  return [
+    "Escalation plan:",
+    "1. Acknowledge this message now.",
+    "2. Open the strategy console and verify risk controls.",
+    "3. Execute the safest mitigation path or pause the strategy.",
+    cooldownLine,
+  ].join("\n");
 }

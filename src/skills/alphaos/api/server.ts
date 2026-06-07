@@ -15,7 +15,7 @@ import {
 } from "../living-assistant/contact-policy";
 import { DigestBatchScheduler } from "../living-assistant/digest-batching";
 import { runLivingAssistantLoop } from "../living-assistant/loop";
-import { normalizeSignal, type NormalizedSignal, type SignalUrgency } from "../living-assistant/signal-radar";
+import { normalizeSignal, type NormalizedSignal } from "../living-assistant/signal-radar";
 import {
   getNetworkProfileReadinessSnapshot,
   probeNetworkProfileReadiness,
@@ -1497,15 +1497,10 @@ function demoHtml(): string {
 }
 
 const livingAssistantAttentionLevels = [
-  "silent",
-  "digest",
-  "text_nudge",
-  "voice_brief",
-  "strong_interrupt",
-  "call_escalation",
+  "log",
+  "notify",
+  "call",
 ] as const satisfies readonly AttentionLevel[];
-
-const livingAssistantUrgencies = ["low", "medium", "high", "critical"] as const satisfies readonly SignalUrgency[];
 
 const defaultLivingAssistantRiskTolerance: UserContext["riskTolerance"] = "moderate";
 
@@ -1560,14 +1555,6 @@ function toRiskTolerance(input: unknown): UserContext["riskTolerance"] {
   return defaultLivingAssistantRiskTolerance;
 }
 
-function toSignalUrgency(input: unknown, fallback: SignalUrgency): SignalUrgency {
-  const value = readTrimmedString(input);
-  if (isAllowedValue(value, livingAssistantUrgencies)) {
-    return value;
-  }
-  return fallback;
-}
-
 function toAttentionLevel(input: unknown): AttentionLevel | undefined {
   const value = readTrimmedString(input);
   if (!value) {
@@ -1616,18 +1603,6 @@ function mergeLivingAssistantPolicyConfig(input: unknown): ContactPolicyConfig {
       1,
       10_000,
     ),
-    minSignalUrgencyForVoice: toSignalUrgency(
-      payload.minSignalUrgencyForVoice,
-      defaultContactPolicyConfig.minSignalUrgencyForVoice,
-    ),
-    minSignalUrgencyForCallEscalation: toSignalUrgency(
-      payload.minSignalUrgencyForCallEscalation,
-      defaultContactPolicyConfig.minSignalUrgencyForCallEscalation,
-    ),
-    allowVoiceBrief:
-      typeof payload.allowVoiceBrief === "boolean"
-        ? payload.allowVoiceBrief
-        : defaultContactPolicyConfig.allowVoiceBrief,
     allowCallEscalation:
       typeof payload.allowCallEscalation === "boolean"
         ? payload.allowCallEscalation

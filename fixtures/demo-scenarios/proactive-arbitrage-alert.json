@@ -27,6 +27,6 @@
     "quietHoursEnd": 8,
     "maxDailyContacts": 12
   },
-  "expectedAttentionLevel": "voice_brief",
+  "expectedAttentionLevel": "notify",
   "expectedBrief": true
 }

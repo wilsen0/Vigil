@@ -40,6 +40,6 @@
     "quietHoursEnd": 8,
     "maxDailyContacts": 12
   },
-  "expectedAttentionLevel": "call_escalation",
+  "expectedAttentionLevel": "call",
   "expectedBrief": true
 }

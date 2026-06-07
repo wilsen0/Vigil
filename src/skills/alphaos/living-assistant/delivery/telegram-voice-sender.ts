@@ -154,12 +154,6 @@ export class TelegramVoiceSender {
     }
   }
 
-  // Backward-compatible alias.
-  async sendText(text: string, options?: TelegramMessageOptions): Promise<TelegramVoiceSendResult> {
-    return this.sendMessage(text, options);
-  }
-
-  // Backward-compatible helper used by existing delivery executor.
   async sendVoiceWithFollowUp(
     audio: Buffer,
     voiceCaption: string,

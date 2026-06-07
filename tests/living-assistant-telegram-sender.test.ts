@@ -87,7 +87,7 @@ describe("telegram voice sender", () => {
       chatId: "owner-chat-id",
     });
 
-    const result = await sender.sendText("Heads up", {
+    const result = await sender.sendMessage("Heads up", {
       parseMode: "Markdown",
       disableNotification: true,
     });
@@ -192,7 +192,7 @@ describe("telegram voice sender", () => {
     );
     globalThis.fetch = networkErrorFetch as unknown as typeof fetch;
 
-    const textResult = await sender.sendText("hello");
+    const textResult = await sender.sendMessage("hello");
     expect(textResult.ok).toBe(false);
     expect(textResult.error).toContain("network down");
   });

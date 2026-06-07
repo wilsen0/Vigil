@@ -26,6 +26,6 @@
     "quietHoursStart": 23,
     "quietHoursEnd": 8
   },
-  "expectedAttentionLevel": "digest",
+  "expectedAttentionLevel": "log",
   "expectedBrief": false
 }

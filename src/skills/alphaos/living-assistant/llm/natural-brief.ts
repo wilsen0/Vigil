@@ -2,21 +2,7 @@ import type { ContactDecision } from "../contact-policy";
 import type { NormalizedSignal } from "../signal-radar";
 import { generateVoiceBrief } from "../voice-brief";
 import { chatCompletion, isLLMEnabled, resolveLLMApiKey } from "./llm-client";
-import type { LLMRuntimeOptions, NaturalBriefTarget, SignalGroup } from "./types";
-
-const URGENCY_RANK: Record<NormalizedSignal["urgency"], number> = {
-  low: 0,
-  medium: 1,
-  high: 2,
-  critical: 3,
-};
-
-function isSignalGroup(target: NaturalBriefTarget): target is SignalGroup {
-  return (
-    typeof (target as SignalGroup).groupKey === "string" &&
-    Array.isArray((target as SignalGroup).signals)
-  );
-}
+import type { LLMRuntimeOptions } from "./types";
 
 function splitSentences(text: string): string[] {
   return text
@@ -27,12 +13,8 @@ function splitSentences(text: string): string[] {
 
 function trimToSentenceLimit(text: string, language: "zh" | "en", maxSentences = 3): string {
   const sentences = splitSentences(text);
-  if (sentences.length <= maxSentences) {
-    return text;
-  }
-  if (language === "zh") {
-    return sentences.slice(0, maxSentences).join("");
-  }
+  if (sentences.length <= maxSentences) return text;
+  if (language === "zh") return sentences.slice(0, maxSentences).join("");
   return sentences.slice(0, maxSentences).join(" ");
 }
 
@@ -42,80 +24,41 @@ function isWrappedInMatchingQuotes(text: string): boolean {
 
 function normalizeCompletionText(raw: string): string {
   const trimmed = raw.trim();
-  if (!trimmed) {
-    return "";
-  }
+  if (!trimmed) return "";
 
   const fencedMatch = trimmed.match(/```(?:text)?\s*([\s\S]*?)```/i);
-  if (fencedMatch?.[1]) {
-    return fencedMatch[1].trim();
-  }
+  if (fencedMatch?.[1]) return fencedMatch[1].trim();
 
-  if (isWrappedInMatchingQuotes(trimmed)) {
-    return trimmed.slice(1, -1).trim();
-  }
+  if (isWrappedInMatchingQuotes(trimmed)) return trimmed.slice(1, -1).trim();
 
   return trimmed;
 }
 
-function pickRepresentativeSignal(target: NaturalBriefTarget): NormalizedSignal {
-  if (!isSignalGroup(target)) {
-    return target;
-  }
-
-  const sorted = [...target.signals].sort((a, b) => URGENCY_RANK[b.urgency] - URGENCY_RANK[a.urgency]);
-  return sorted[0] ?? target.signals[0];
-}
-
 function fallbackBriefText(
-  target: NaturalBriefTarget,
+  signal: NormalizedSignal,
   decision: ContactDecision,
   language: "zh" | "en",
 ): string {
-  const representativeSignal = pickRepresentativeSignal(target);
-  return generateVoiceBrief(representativeSignal, decision, { language }).text;
+  return generateVoiceBrief(signal, decision, { language }).text;
 }
 
-function formatTargetContext(target: NaturalBriefTarget): string {
-  if (!isSignalGroup(target)) {
-    return JSON.stringify({
-      signalId: target.signalId,
-      source: target.source,
-      type: target.type,
-      title: target.title,
-      body: target.body,
-      urgency: target.urgency,
-      pair: target.pair,
-      tokenAddress: target.tokenAddress,
-      chainId: target.chainId,
-      detectedAt: target.detectedAt,
-      metadata: target.metadata,
-    });
-  }
-
+function formatSignalContext(signal: NormalizedSignal): string {
   return JSON.stringify({
-    groupKey: target.groupKey,
-    mergedTitle: target.mergedTitle,
-    attentionLevel: target.attentionLevel,
-    signalCount: target.signals.length,
-    signals: target.signals.map((signal) => ({
-      signalId: signal.signalId,
-      source: signal.source,
-      type: signal.type,
-      title: signal.title,
-      body: signal.body,
-      urgency: signal.urgency,
-      pair: signal.pair,
-      tokenAddress: signal.tokenAddress,
-      chainId: signal.chainId,
-      detectedAt: signal.detectedAt,
-      metadata: signal.metadata,
-    })),
+    signalId: signal.signalId,
+    source: signal.source,
+    type: signal.type,
+    title: signal.title,
+    body: signal.body,
+    urgency: signal.urgency,
+    pair: signal.pair,
+    tokenAddress: signal.tokenAddress,
+    chainId: signal.chainId,
+    detectedAt: signal.detectedAt,
   });
 }
 
-function buildPrompt(target: NaturalBriefTarget, decision: ContactDecision, language: "zh" | "en"): string {
-  const context = formatTargetContext(target);
+function buildPrompt(signal: NormalizedSignal, decision: ContactDecision, language: "zh" | "en"): string {
+  const context = formatSignalContext(signal);
 
   if (language === "zh") {
     return [
@@ -155,20 +98,16 @@ function buildPrompt(target: NaturalBriefTarget, decision: ContactDecision, lang
 }
 
 export async function generateNaturalBrief(
-  target: NaturalBriefTarget,
+  signal: NormalizedSignal,
   decision: ContactDecision,
   language: "zh" | "en",
   options: LLMRuntimeOptions = {},
 ): Promise<string> {
-  const fallback = fallbackBriefText(target, decision, language);
-  if (!isLLMEnabled(options.llmEnabled)) {
-    return fallback;
-  }
+  const fallback = fallbackBriefText(signal, decision, language);
+  if (!isLLMEnabled(options.llmEnabled)) return fallback;
 
   const apiKey = resolveLLMApiKey(options.llmApiKey);
-  if (!apiKey) {
-    return fallback;
-  }
+  if (!apiKey) return fallback;
 
   const systemPrompt = language === "zh"
     ? "你是小音，一个元气满满的 AI 助理。老大让你盯着 BNB 生态的动态，有重要事情要第一时间用语音简报汇报。你说话直接、有信息量、不废话。"
@@ -176,14 +115,8 @@ export async function generateNaturalBrief(
 
   const completion = await chatCompletion(
     [
-      {
-        role: "system",
-        content: systemPrompt,
-      },
-      {
-        role: "user",
-        content: buildPrompt(target, decision, language),
-      },
+      { role: "system", content: systemPrompt },
+      { role: "user", content: buildPrompt(signal, decision, language) },
     ],
     {
       apiKey,
@@ -192,14 +125,10 @@ export async function generateNaturalBrief(
     },
   );
 
-  if (!completion) {
-    return fallback;
-  }
+  if (!completion) return fallback;
 
   const normalized = normalizeCompletionText(completion);
-  if (!normalized) {
-    return fallback;
-  }
+  if (!normalized) return fallback;
 
   return trimToSentenceLimit(normalized, language, 3);
 }

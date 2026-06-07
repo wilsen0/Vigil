@@ -52,5 +52,5 @@
   "policyConfig": {
     "allowCallEscalation": false
   },
-  "expectedAttentionLevel": "voice_brief"
+  "expectedAttentionLevel": "notify"
 }
